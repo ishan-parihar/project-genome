@@ -1,0 +1,141 @@
+# venture-pipeline: the three lanes that turn a signal into paid work (job, freelance, architecture). Each lane keeps its
+# own ladder, because the rules differ (a lead needs a named person; an application does not). One append-only outcome
+# ledger, shared by all three, is the only input to the lane score.
+[blueprint]
+name = "venture-pipeline"
+version = "1"
+summary = "job applications, freelance gigs and architecture leads, each on its own ladder; triggers are not leads; outcomes are an append-only ledger that drives the lane score"
+modules = ["core", "records"]
+routes = [
+  ["which lane loses hours this week, and why", "`docs/PIPELINE.md` (lane score, written weekly by the score script from the outcome ledger)"],
+  ["which applications and gigs need a human now", "`genome view agenda-applications` / `agenda-gigs` / wake QUEUE"],
+  ["what is a trigger and which architecture items are not leads", "`genome view triggers` (never counted)"],
+  ["every send, reply, interview, offer and win, in order", "`pipeline/outcomes.jsonl` (`genome find outcome`)"],
+  ["who a lead is, and whether their CRM record exists", "`genome find contact` (crm_ref → relationship-crm)"],
+]
+playbook = '''
+**What this is.** The revenue pipeline for three lanes. A lane is a ladder of states for one kind of item; the kinds do
+not share a ladder, because the gates differ. Everything that is sent, answered or won is one row in `outcome`.
+
+- `application` (job lane, career-pipeline): a remote job application. States follow career-pipeline's
+  `application_status_transitions`: discovered, applied, responded, interviewed, offered, closed-won, rejected, withdrawn.
+- `gig` (freelance lane, freelance-agency): an inbound or outbound freelance lead. States follow freelance-agency's
+  statuses: new, contacted, negotiating, closed-won, closed-lost, stale.
+- `lead` (architecture lane, architectural-leads): a signal that may yield a person. It starts as `trigger`.
+- `contact`: a named human, with the `crm_ref` of their relationship-crm record. No state.
+- `outcome` (append-only ledger): one row per send, failure, reply, interview, offer, win or loss. The ledger is the
+  only input to the lane score. Other event kinds in the ventures' own logs (score, track, enrich, research and so on)
+  are not outcomes and do not belong here.
+
+**Rules the schema enforces.**
+- **A trigger is not a lead** (architectural-leads DA-RG-052). A `lead` in `trigger` has no person. It cannot pass
+  `new` to `contacted` without one: `contacted` and every later state need a `person` relation whose contact has a `crm_ref`.
+  Counts reported as pipeline come from `new` and later only.
+- **Sending is evidence.** `applied`, `contacted` and `new`-to-`contacted` moves need an `outcome` row about the item
+  (evidence_ref). Write the row first, then move the item.
+- **Wins are human-only.** `closed-won` (gig, application) and `won` in the ledger are set only with `--human`: a paid
+  engagement or an accepted offer is confirmed by the operator, not inferred from a reply.
+- **The ledger is append-only.** A mistaken row is corrected by a new row, never by an edit.
+
+**Lane score (revenue plan §3).** Score = P(first paid reply within 30 days) × first ticket ÷ days to cash, per lane,
+computed weekly from the `outcome` rows. The score is computed by a script, not the kernel; its result is written into
+`docs/PIPELINE.md`. The lowest-scoring lane loses hours first, and no lane closes by default. **The count zones in
+`docs/PIPELINE.md` are stale until `genome emit` is re-run: run it after any row write, or the dashboard shows the
+counts from the last emit, not the rows.**
+
+**Gates before auto-send.** None is passed yet. Sends run by hand, under per-lane daily caps, and each one is logged
+as an `outcome` row. Automatic sending waits for the revenue plan's §6 gates.
+
+**Mapping from the ventures' own ladders (for a later migration; this blueprint moves no data).**
+- career-pipeline `application_statuses` → `application` states, one to one.
+- freelance-agency statuses `new`, `contacted`, `negotiating`, `closed-won`, `closed-lost`, `stale` → `gig` states, one to one.
+- freelance-agency event kinds `outcome`, `outreach`, `rejected`, `send_failed` → `outcome` states `sent`, `failed`, `lost`.
+- architectural-leads items with no named person stay `trigger`; the 301 current items are triggers, not leads.
+'''
+
+[kinds.application]
+path = "pipeline/applications"
+id = "AP-{n:04}"
+fields = { employer = "text!", country = "text", source = "text", url = "text" }
+states = ["discovered", "applied", "responded", "interviewed", "offered", "closed-won", "rejected", "withdrawn", "stale"]
+initial = "discovered"
+transitions = { discovered = ["applied", "rejected", "withdrawn", "stale"], applied = ["responded", "interviewed", "rejected", "withdrawn"], responded = ["interviewed", "offered", "rejected", "withdrawn"], interviewed = ["offered", "rejected", "withdrawn"], offered = ["closed-won", "rejected", "withdrawn"], stale = ["discovered"] }
+evidence_on = ["applied"]
+evidence_ref = { applied = "outcome?about=@self" }
+human_only = ["closed-won"]
+[kinds.application.relations]
+person = { to = "contact", max = 1, inverse = "contact-of" }
+
+[kinds.gig]
+path = "pipeline/gigs"
+id = "GG-{n:04}"
+fields = { client = "text", domain = "enum:freelance|consulting|product|inbound!", value = "text", channel = "text" }
+states = ["new", "contacted", "negotiating", "closed-won", "closed-lost", "stale"]
+initial = "new"
+transitions = { new = ["contacted", "stale"], contacted = ["negotiating", "closed-lost", "stale"], negotiating = ["closed-won", "closed-lost", "stale"], stale = ["new"] }
+evidence_on = ["contacted"]
+evidence_ref = { contacted = "outcome?about=@self" }
+human_only = ["closed-won"]
+[kinds.gig.relations]
+person = { to = "contact", max = 1, inverse = "contact-of" }
+
+[kinds.lead]
+path = "pipeline/leads"
+id = "LD-{n:04}"
+fields = { signal_stream = "enum:builder|smb|homeowner!", location = "text", score = "text" }
+states = ["trigger", "new", "contacted", "replied", "negotiating", "closed-won", "closed-lost", "stale"]
+initial = "trigger"
+transitions = { trigger = ["new", "stale"], new = ["contacted", "stale"], contacted = ["replied", "closed-lost", "stale"], replied = ["negotiating", "closed-won", "closed-lost"], negotiating = ["closed-won", "closed-lost", "stale"], stale = ["trigger"] }
+evidence_on = ["contacted"]
+evidence_ref = { contacted = "outcome?about=@self" }
+human_only = ["closed-won"]
+[kinds.lead.relations]
+person = { to = "contact", max = 1, required_in = ["contacted", "replied", "negotiating", "closed-won", "closed-lost"], inverse = "contact-of" }
+
+[kinds.contact]
+path = "pipeline/contacts"
+id = "CT-{n:04}"
+fields = { name = "text!", crm_ref = "text!" }
+
+[kinds.outcome]
+store = "jsonl"
+path = "pipeline/outcomes.jsonl"
+id = "OU-{n:04}"
+mutability = "append-only"
+fields = { venture = "enum:job|freelance|architecture!", channel = "text", amount = "text", note = "text" }
+states = ["sent", "failed", "reply", "interview", "offer", "won", "lost"]
+initial = "sent"
+transitions = { sent = ["failed", "reply", "interview", "offer", "won", "lost"], reply = ["interview", "offer", "won", "lost"], interview = ["offer", "won", "lost"], offer = ["won", "lost"] }
+human_only = ["won"]
+[kinds.outcome.relations]
+about = { to = "application|gig|lead", max = 1, inverse = "outcome" }
+
+[views.agenda-applications]
+kind = "application"
+where = ["state!=discovered", "state!=applied", "state!=rejected", "state!=withdrawn", "state!=closed-won", "state!=stale"]
+wake = true
+
+[views.agenda-gigs]
+kind = "gig"
+where = ["state!=new", "state!=closed-won", "state!=closed-lost", "state!=stale"]
+wake = true
+
+[views.triggers]
+kind = "lead"
+state = "trigger"
+wake = false
+
+[views.counts-applications]
+kind = "application"
+group_count = true
+into = "docs/PIPELINE.md#application-counts"
+
+[views.counts-gigs]
+kind = "gig"
+group_count = true
+into = "docs/PIPELINE.md#gig-counts"
+
+[views.counts-leads]
+kind = "lead"
+group_count = true
+into = "docs/PIPELINE.md#lead-counts"

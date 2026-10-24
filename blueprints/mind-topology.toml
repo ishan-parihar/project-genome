@@ -1,0 +1,227 @@
+# mind-topology: a private map of one person's subjective reality, built in a loop with agents.
+# Applied by `genome init --blueprint mind-topology`; this file is copied verbatim to genome/kinds/.
+[blueprint]
+name = "mind-topology"
+version = "1"
+summary = "a private map of one mind: engrams, emotions, shadows, processes and complexes, how they link, where new material lands, how knots untangle"
+modules = ["core"]
+privacy = "local"
+routes = [
+  ["what is in my map right now (counts per state)", "`docs/MAP.md` (generated)"],
+  ["one engram, emotion, shadow or process and everything linked to it", "`genome show <id>`"],
+  ["where does this new material land", "`genome place \"<the operator's words>\"`"],
+  ["what feeds itself, where the leverage is, what holds two clusters together", "`genome graph cycles | hubs | bridges`"],
+  ["what we discussed, session by session", "`map/sessions.jsonl` (`genome find session`)"],
+]
+playbook = '''
+**What this is.** A private, local map of one person's inner world, built in dialogue. The operator is the only
+authority on their own experience. The agent listens, records, asks and proposes structure; the operator confirms.
+This is reflective self-mapping, not therapy and not diagnosis. If the operator signals crisis (danger to
+themselves or others, or acute distress), stop mapping, say so plainly and point to human help.
+
+**The map.**
+- `engram`: a unit of experience: a memory, belief, image, sensation, urge, value, story or dream, recorded in
+  the operator's own words.
+- `emotion`: a felt state and where it sits in the body.
+- `shadow`: a disowned quality; a "golden" shadow is a disowned strength.
+- `process`: something that runs automatically: a defence, schema, loop, coping move, drive or habit.
+- `complex`: a cluster where engrams pool around one core theme.
+- `insight`: an interpretation. Every agent interpretation lives here and stays `proposed` until the operator
+  confirms it.
+- `session`: the append-only log of each conversation.
+
+**Causal edges.** These are directed, so they can close loops. Which kind may use which (the full list, with enum
+values, is `genome blueprint show mind-topology`):
+- engram: `triggers` (→ engram | emotion | process), `feeds` (→ engram | emotion | process | complex: "the more X, the
+  more Y"), `evokes` (→ emotion), `reframes` (→ engram);
+- emotion: `triggers`, `feeds`, `masks` (→ emotion);
+- process: `triggers`, `feeds`, `defends_against` (→ engram | emotion | shadow);
+- shadow: `fuels` (→ process | emotion), `shows_as` (→ engram | emotion).
+
+**Structure.** `pools_into`, `integrates_into`, `core_engram`, `part_of`, `held_in`.
+
+**Symmetric.** `correlates_with`, `contradicts`.
+
+**What goes where.** A thought, belief, memory or image in the operator's words is an `engram`. Something the operator
+says they *do* ("I avoid rooms like that") is a `process` with `type=behaviour`, which names what happens and claims
+nothing about why. Only the operator's own causal statements become edges. An edge you inferred goes into an
+`insight` first and is linked only when the operator agrees; `graph cycles` finds a loop only once its closing edge
+exists, so a suspected loop is a proposed insight until then.
+
+**The loop, one session at a time.**
+1. `genome wake`. The QUEUE lists unmapped engrams, knots being untangled and insights awaiting the operator.
+2. Open the session: `genome new session --title "<topic>" --set mode=capture`, which returns SE-n.
+3. For each piece of material:
+   1. Run `genome place "<the operator's words>"` to get the nearest entries and candidate edges.
+   2. Record the material verbatim: `genome new engram --title "<short handle>" --set statement="<their words>"
+      --link from_session=SE-n`. Add `--link pools_into=CX-k` and the others only when the operator agrees.
+      Never write an interpretation into `statement`. For several pieces at once, one call:
+      `genome new --batch -` with one JSON object per line (see below).
+   3. Ask, don't tell: "does this connect to EN-12 (…)?" Then link what the operator confirms:
+      `genome link EN-40 triggers EM-3`.
+   4. When the material is placed and linked, `genome move EN-40 mapped`.
+4. Look for structure, and show the operator the result, not the method:
+   - `genome graph cycles` finds knots that feed themselves, e.g. a fear that triggers an avoidance that feeds
+     the fear;
+   - `genome graph hubs` finds the entries most things pass through, the leverage points;
+   - `genome graph bridges` finds a single link holding two clusters together, where an integration or a split
+     happens;
+   - `genome graph gaps` finds two entries sharing neighbours but never linked, a question worth asking;
+   - `genome graph neighbors EN-40 --depth 2` shows the local terrain of one entry.
+5. Propose an interpretation, never assert one: `genome new insight --title "…" --set statement="…" --set
+   type=pattern --set origin=agent --link about=EN-12,PR-3 --link from_session=SE-n`.
+6. Untangle one knot at a time:
+   - `genome move EN-12 untangling`, then work the knot with the operator;
+   - when the operator says it has loosened, they run `genome move EN-12 untangled --evidence SE-n --human <name>`;
+   - integration, owning a shadow and transforming a process are human-only too.
+7. **Retreat when the operator changes their mind.** If an engram was recorded wrongly, or the operator
+   now rejects a belief they once held, do not delete it and do not park it: `parked` means "not now",
+   `retracted` means "this was wrong". Preview first — `genome impact EN-12 --to retracted` lists every
+   entry that depends on it, hop by hop, with the command that clears each hop, and changes nothing. Then
+   `genome move EN-12 retracted --evidence <session or the operator's words>`. Anything built on it is
+   flagged by `genome lint` (E510) and must be retracted or unlinked in its turn, one hop at a time, each
+   hop a reviewed step. A new entry may not rest on a retracted one: `genome new` refuses at write time.
+   This is why the relations carry `taint`, and why the map is honest about what it no longer believes.
+8. Close: `genome move SE-n closed`, then `genome close`. The map stays on this machine: `close` refuses if the
+   repo has a git remote.
+
+**Token rules.** Use `show`, `find`, `graph` and `place`, which return ids and one-line summaries. Never read the
+whole `map/` directory. Batch several new entries in one call with `genome new --batch -`, one JSON object per
+line: `{"kind":"engram","title":"…","set":{"statement":"…"},"link":{"from_session":"SE-0001","triggers":"@2"}}`.
+`@N` names the entity made by line N of the input (1-based); a link value is an id, `"A,B"`, or a list, and may mix
+`@N` with ids. Fields are single-line; long prose goes in `"body"`.
+'''
+
+[kinds.engram]
+path = "map/engrams"
+id = "EN-{n:04}"
+mutability = "amendable"
+fields = { statement = "text!", modality = "enum:memory|belief|image|sensation|urge|value|story|dream|fantasy", valence = "enum:-3..3", intensity = "int:0..10", age = "text", source = "enum:session|journal|dream|body|observation|other", confidence = "enum:tentative|felt|certain" }
+states = ["captured", "mapped", "untangling", "untangled", "integrated", "parked", "retracted"]
+transitions = { captured = ["mapped", "parked", "retracted"], mapped = ["untangling", "integrated", "parked", "retracted"], untangling = ["untangled", "mapped", "parked", "retracted"], untangled = ["integrated", "mapped", "retracted"], integrated = ["mapped", "retracted"], parked = ["captured", "retracted"], retracted = ["captured"] }
+evidence_on = ["untangled", "integrated"]
+human_only = ["untangled", "integrated"]
+quarantine = "retracted"
+[kinds.engram.relations]
+triggers = { to = "engram|emotion|process", inverse = "triggered-by", taint = ["retracted"] }
+feeds = { to = "engram|emotion|process|complex", inverse = "fed-by", taint = ["retracted"] }
+evokes = { to = "emotion", inverse = "evoked-by", taint = ["retracted"] }
+pools_into = { to = "complex", inverse = "pools", taint = ["retracted"] }
+integrates_into = { to = "engram|complex", inverse = "integrates", taint = ["retracted"] }
+reframes = { to = "engram", inverse = "reframed-by", taint = ["retracted"] }
+correlates_with = { to = "engram", symmetric = true }
+contradicts = { to = "engram", symmetric = true }
+from_session = { to = "session", graph = false, inverse = "captured" }
+
+[kinds.emotion]
+path = "map/emotions"
+id = "EM-{n:03}"
+fields = { family = "enum:fear|anger|sadness|joy|disgust|shame|guilt|surprise|longing|other!", intensity = "int:0..10", body = "text" }
+states = ["noticed", "felt", "metabolised", "retracted"]
+transitions = { noticed = ["felt", "retracted"], felt = ["metabolised", "noticed", "retracted"], metabolised = ["felt", "retracted"], retracted = ["noticed"] }
+evidence_on = ["metabolised"]
+human_only = ["metabolised"]
+quarantine = "retracted"
+[kinds.emotion.relations]
+triggers = { to = "engram|emotion|process", inverse = "triggered-by", taint = ["retracted"] }
+feeds = { to = "engram|emotion|process|complex", inverse = "fed-by", taint = ["retracted"] }
+masks = { to = "emotion", inverse = "masked-by", taint = ["retracted"] }
+from_session = { to = "session", graph = false, inverse = "captured" }
+
+[kinds.shadow]
+path = "map/shadows"
+id = "SH-{n:03}"
+fields = { trait = "text!", golden = "bool", projected_onto = "text" }
+states = ["suspected", "recognised", "owned", "integrated", "retracted"]
+transitions = { suspected = ["recognised", "retracted"], recognised = ["owned", "suspected", "retracted"], owned = ["integrated", "retracted"], integrated = ["retracted"], retracted = ["suspected"] }
+evidence_on = ["owned", "integrated"]
+human_only = ["recognised", "owned", "integrated"]
+quarantine = "retracted"
+[kinds.shadow.relations]
+fuels = { to = "process|emotion", inverse = "fuelled-by", taint = ["retracted"] }
+shows_as = { to = "engram|emotion", inverse = "shows", taint = ["retracted"] }
+held_in = { to = "complex", inverse = "holds", taint = ["retracted"] }
+from_session = { to = "session", graph = false, inverse = "captured" }
+
+[kinds.process]
+path = "map/processes"
+id = "PR-{n:03}"
+fields = { type = "enum:behaviour|defence|schema|loop|coping|drive|habit!", mechanism = "text", protects = "text", cost = "text" }
+states = ["suspected", "observed", "interrupted", "transformed", "retracted"]
+transitions = { suspected = ["observed", "retracted"], observed = ["interrupted", "suspected", "retracted"], interrupted = ["transformed", "observed", "retracted"], transformed = ["interrupted", "retracted"], retracted = ["suspected"] }
+evidence_on = ["interrupted", "transformed"]
+human_only = ["transformed"]
+quarantine = "retracted"
+[kinds.process.relations]
+triggers = { to = "engram|emotion|process", inverse = "triggered-by", taint = ["retracted"] }
+feeds = { to = "engram|emotion|process|complex", inverse = "fed-by", taint = ["retracted"] }
+defends_against = { to = "engram|emotion|shadow", inverse = "defended-by", taint = ["retracted"] }
+from_session = { to = "session", graph = false, inverse = "captured" }
+
+[kinds.complex]
+path = "map/complexes"
+id = "CX-{n:03}"
+fields = { core = "text!", origin = "text" }
+states = ["forming", "named", "loosening", "resolved", "retracted"]
+transitions = { forming = ["named", "retracted"], named = ["loosening", "retracted"], loosening = ["resolved", "named", "retracted"], resolved = ["retracted"], retracted = ["forming"] }
+evidence_on = ["resolved"]
+human_only = ["resolved"]
+quarantine = "retracted"
+[kinds.complex.relations]
+core_engram = { to = "engram", max = 1, inverse = "core-of", taint = ["retracted", "parked"] }
+part_of = { to = "complex", inverse = "contains", taint = ["retracted"] }
+
+[kinds.insight]
+path = "map/insights"
+id = "IN-{n:04}"
+fields = { statement = "text!", type = "enum:pattern|reframe|link|leverage|question!", origin = "enum:operator|agent!" }
+states = ["proposed", "confirmed", "rejected", "retracted"]
+transitions = { proposed = ["confirmed", "rejected", "retracted"], confirmed = ["rejected", "retracted"], rejected = ["proposed"], retracted = ["proposed"] }
+human_only = ["confirmed"]
+quarantine = "retracted"
+[kinds.insight.relations]
+about = { to = "*", min = 1, graph = false, inverse = "insight", taint = ["retracted", "parked"] }
+from_session = { to = "session", graph = false, inverse = "captured" }
+
+[kinds.session]
+path = "map/sessions.jsonl"
+store = "jsonl"
+id = "SE-{n:04}"
+fields = { mode = "enum:capture|map|untangle|integrate|review!", summary = "text" }
+states = ["open", "closed"]
+transitions = { open = ["closed"], closed = ["open"] }
+
+[views.unmapped]
+kind = "engram"
+state = "captured"
+wake = true
+
+[views.untangling]
+kind = "engram"
+state = "untangling"
+wake = true
+
+[views.awaiting-operator]
+kind = "insight"
+state = "proposed"
+wake = true
+
+[views.engram-counts]
+kind = "engram"
+group_count = true
+into = "docs/MAP.md#engram-counts"
+
+[views.process-counts]
+kind = "process"
+group_count = true
+into = "docs/MAP.md#process-counts"
+
+[views.shadow-counts]
+kind = "shadow"
+group_count = true
+into = "docs/MAP.md#shadow-counts"
+
+[views.complexes]
+kind = "complex"
+columns = ["id", "state", "title", "core"]
+into = "docs/MAP.md#complexes"

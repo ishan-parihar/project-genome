@@ -1,0 +1,146 @@
+# intersubjective: several people's maps in one graph, every entry owned by a subject and seen by a subject.
+# Extends mind-topology: its kinds deep-merge into the base kinds, which gain `of` and `seen_by`.
+[blueprint]
+name = "intersubjective"
+version = "1"
+summary = "two or more mind maps in one graph: subjects, bonds, transactions (TA), patterns and attachment; cross-map loops, bridges and gaps show the unseen leverage"
+extends = ["mind-topology"]
+modules = ["core"]
+privacy = "local"
+seed = [{ kind = "subject", title = "self", set = { role = "self", consent = "self" } }]
+routes = [
+  ["who is in the map, their attachment style and its source", "`genome find subject`"],
+  ["what runs between two people (loops, the single link carrying a dynamic, unasked questions)", "`genome graph cycles | bridges | gaps --across of`"],
+  ["which exchanges crossed or carried an ulterior message", "`genome find transaction --where type!=complementary`"],
+]
+playbook = '''
+**Perspective comes first.** Every entry (including `bond`, `transaction` and `pattern`) has `seen_by`, the
+subject whose perception it records, and each mind entry has `of`, the subject whose map it belongs to. Both default to SU-01, the self subject seeded at init. An entry with
+`of ≠ seen_by` is a model of another person as perceived by someone. It is never a claim about their inner
+reality. Write such statements as perception: "I experience Alex as withdrawing when…". Another person's own
+account goes in with `seen_by` set to them, and only if they gave it (`consent=given` on their subject).
+
+**Added kinds.**
+- `subject`: a person. Fields: `role`, a general `attachment` style and `attachment_source`. An `inferred`
+  style is a hypothesis, never a label to use on the person.
+- `bond`: one relationship between exactly two subjects, with `safety` (0–10) and its attachment `dynamic`.
+- `transaction`: one exchange between two people. Its ego-state fields are optional: with none, it records a joint
+  event ("Mum and I argued; my brother joined in") that belongs to neither map alone. With them, it is a
+  transactional-analysis exchange, recording the stimulus ego state and the response ego state:
+  - CP = controlling parent, NP = nurturing parent, A = adult, FC = free child, AC = adapted child;
+  - `type`: complementary (the lines run parallel and talk can go on), crossed (communication breaks), ulterior
+    (a hidden psychological message).
+- `pattern`: a recurring dynamic between people: a game, drama-triangle positions (persecutor, rescuer,
+  victim), pursue–withdraw, a script or a collusion.
+
+**Cross-map edges.**
+- Directed: `triggers`, `feeds` and `defends_against` work across maps unchanged; `projects_onto` is a
+  shadow landing on someone.
+- Symmetric: `complements` (two processes that lock together) and `mirrors` (the same wound in two people).
+
+**Consent.** A subject with `consent=not-asked` or `declined` may be mapped only as perceived, and the map stays
+local. `genome find subject --where consent!=given` lists who has not agreed; surface that to the operator before
+adding more about them. `close` does not block on it: this is a judgement, not a schema rule.
+
+**Adding people to a map.** On an existing mind-topology genome run `genome init --blueprint intersubjective`. Entries
+made earlier get `of` and `seen_by` = SU-01 automatically.
+
+**The loop.** It is the mind-topology loop, plus:
+1. Add a person: `genome new subject --title "Alex" --set role=partner --set attachment=unknown --set
+   consent=not-asked`.
+2. Map them as perceived: `genome new process --title "goes quiet" --set type=behaviour --link of=SU-02`.
+   `seen_by` stays SU-01. Use `type=behaviour` for what you saw them do; `defence` or `coping` says why they did it,
+   which only they can say.
+3. Record an exchange as it happened: `genome new transaction --title "dishes, Tue" --set stimulus=CP --set
+   response=AC --set type=complementary --link between=SU-01,SU-02 --link triggered=EM-4`.
+4. Find what neither map shows alone:
+   - `genome graph cycles --across of`: loops that run through both people. A's withdrawal triggers B's
+     pursuit, which triggers A's withdrawal. This is the interlocking cycle to name as a `pattern`.
+   - `genome graph bridges --across of`: the single link carrying a whole dynamic. Change it and the dynamic
+     changes, so it is the leverage point.
+   - `genome graph hubs --across of`: the entries most entangled across the maps.
+   - `genome graph gaps --across of`: an entry of A and an entry of B that share neighbours but were never
+     linked. Offer it as a question, never as a finding.
+5. Name a pattern only with the operator: `genome new pattern --title "pursue-withdraw" --set type=pursue-withdraw
+   --link involves=SU-01,SU-02 --link sustained_by=PR-3,PR-9`. Interrupting and transforming it need evidence;
+   transforming is human-only.
+
+**Third parties.** People in this map did not consent to being modelled unless `consent=given`. Keep the map
+local (`privacy = "local"`; `close` refuses with a git remote). Never quote it to the person as fact.
+'''
+
+[kinds.subject]
+path = "map/subjects"
+id = "SU-{n:02}"
+fields = { role = "enum:self|partner|parent|child|sibling|friend|colleague|client|other!", attachment = "enum:secure|anxious|avoidant|disorganized|unknown", attachment_source = "enum:self-report|assessment|inferred|unknown", consent = "enum:self|given|not-asked|declined" }
+
+[kinds.bond]
+path = "map/bonds"
+id = "BO-{n:03}"
+fields = { dynamic = "enum:secure|anxious-avoidant|anxious-anxious|avoidant-avoidant|disorganized|mixed|unknown", safety = "int:0..10" }
+[kinds.bond.relations]
+between = { to = "subject", min = 2, max = 2, graph = false, inverse = "bond" }
+seen_by = { to = "subject", min = 1, max = 1, graph = false, default = "SU-01", inverse = "perceives" }
+
+[kinds.transaction]
+path = "map/transactions.jsonl"
+store = "jsonl"
+id = "TR-{n:04}"
+fields = { stimulus = "enum:CP|NP|A|FC|AC", response = "enum:CP|NP|A|FC|AC", type = "enum:complementary|crossed|ulterior", verbatim = "text", date = "date" }
+[kinds.transaction.relations]
+between = { to = "subject", min = 2, max = 2, graph = false, inverse = "exchange" }
+triggered = { to = "engram|emotion|process", inverse = "triggered-by-exchange" }
+in_pattern = { to = "pattern", inverse = "instance" }
+during = { to = "session", graph = false, inverse = "exchange" }
+seen_by = { to = "subject", min = 1, max = 1, graph = false, default = "SU-01", inverse = "perceives" }
+
+[kinds.pattern]
+path = "map/patterns"
+id = "PT-{n:03}"
+fields = { type = "enum:game|drama-triangle|pursue-withdraw|script|collusion|other!", roles = "text", payoff = "text" }
+states = ["suspected", "named", "interrupted", "transformed"]
+transitions = { suspected = ["named"], named = ["interrupted", "suspected"], interrupted = ["transformed", "named"] }
+evidence_on = ["interrupted", "transformed"]
+human_only = ["named", "transformed"]
+[kinds.pattern.relations]
+involves = { to = "subject", min = 2, graph = false, inverse = "in-pattern" }
+sustained_by = { to = "engram|emotion|process|shadow", inverse = "sustains" }
+within = { to = "bond", max = 1, graph = false, inverse = "pattern" }
+seen_by = { to = "subject", min = 1, max = 1, graph = false, default = "SU-01", inverse = "perceives" }
+
+# every mind kind gains perspective: whose map, and whose perception
+[kinds.engram.relations]
+of = { to = "subject", min = 1, max = 1, graph = false, default = "SU-01", inverse = "holds" }
+seen_by = { to = "subject", min = 1, max = 1, graph = false, default = "SU-01", inverse = "perceives" }
+mirrors = { to = "engram", symmetric = true }
+[kinds.emotion.relations]
+of = { to = "subject", min = 1, max = 1, graph = false, default = "SU-01", inverse = "holds" }
+seen_by = { to = "subject", min = 1, max = 1, graph = false, default = "SU-01", inverse = "perceives" }
+[kinds.shadow.relations]
+of = { to = "subject", min = 1, max = 1, graph = false, default = "SU-01", inverse = "holds" }
+seen_by = { to = "subject", min = 1, max = 1, graph = false, default = "SU-01", inverse = "perceives" }
+projects_onto = { to = "subject|engram|process|shadow", inverse = "carries-projection-of" }
+[kinds.process.relations]
+of = { to = "subject", min = 1, max = 1, graph = false, default = "SU-01", inverse = "holds" }
+seen_by = { to = "subject", min = 1, max = 1, graph = false, default = "SU-01", inverse = "perceives" }
+complements = { to = "process", symmetric = true }
+[kinds.complex.relations]
+of = { to = "subject", min = 1, max = 1, graph = false, default = "SU-01", inverse = "holds" }
+seen_by = { to = "subject", min = 1, max = 1, graph = false, default = "SU-01", inverse = "perceives" }
+[kinds.insight.relations]
+seen_by = { to = "subject", max = 1, graph = false, default = "SU-01", inverse = "perceives" }
+
+[views.people]
+kind = "subject"
+columns = ["id", "title", "role", "attachment", "attachment_source", "consent"]
+into = "docs/MAP.md#people"
+
+[views.patterns]
+kind = "pattern"
+columns = ["id", "state", "title", "type"]
+into = "docs/MAP.md#patterns"
+
+[views.patterns-in-play]
+kind = "pattern"
+where = ["state!=transformed"]
+wake = true

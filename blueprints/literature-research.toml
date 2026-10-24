@@ -1,0 +1,213 @@
+# literature-research: papers in, verbatim claims out, synthesis and literature-based discovery on top.
+# Built for medical science; works for any field with citable sources.
+[blueprint]
+name = "literature-research"
+version = "1"
+summary = "papers → verbatim claims → normalised concepts → graded findings → novel, testable hypotheses (Swanson ABC gaps, contradictions); retractions cascade"
+modules = ["core", "records"]
+routes = [
+  ["which questions are open, and what answers them", "`genome find question` / `docs/EVIDENCE.md`"],
+  ["what the evidence says, and how certain it is (GRADE)", "`docs/EVIDENCE.md#findings` (generated)"],
+  ["where a claim comes from (verbatim quote, locator, source)", "`genome show CL-n`"],
+  ["what was searched, where, with which query and yield (PRISMA)", "`research/searches.jsonl` (`genome find search`)"],
+  ["candidate discoveries: concepts never linked that share mechanisms", "`genome graph gaps --kind concept`"],
+]
+playbook = '''
+**What this is.** A research pipeline that agents can run on their own. Every number and every assertion
+traces back to a verbatim span of a source. Synthesis is graded, and discovery is a testable hypothesis, never
+a conclusion. **Not medical advice.** Findings carry their GRADE certainty, and hypotheses stay hypotheses
+until a recorded test says otherwise. `supported` is human-only.
+
+**Pipeline and kinds.**
+- `question` (PICO: population, intervention, comparator, outcome): open → answered | dropped.
+- `search` (append-only log: database, query, `executed` yes|no, hits, screened, included). Log every search,
+  including the novelty searches done for hypotheses. If you could not run it (no access), log it with
+  `executed=no` and say so in the report; a hypothesis is `screened` only on the evidence of an executed search.
+- `source`: citation, doi, pmid, year, `design`, n, population, funding.
+  - States: queued → screened → included | excluded (excluded → screened to reconsider; no jumping ahead).
+  - `retracted` can be reached from any state, with the retraction notice as evidence.
+- `claim` (append-only):
+  - `quote` is the exact words, and `locator` names where they are (page, table, figure);
+  - `effect` holds the reported number with its interval, and `direction` says which way it points;
+  - it cites exactly one source, and has a `subject` and an `object` concept;
+  - extracted → verified needs evidence: a second pass that checked the quote against the source.
+- `concept`: a drug, gene, disease, pathway, mechanism, outcome and so on, with an `ontology_id` (MeSH, HGNC,
+  ChEBI, UMLS).
+  - Normalise before linking: one concept per thing. "fish oil" and "omega-3 fatty acids" are one concept
+    (`same_as`, then re-link).
+  - Discovery is only as good as this step.
+- `finding`: a statement about a body of evidence, with required `certainty` (high, moderate, low, very-low,
+  as in GRADE). It is supported by at least one claim and may be contradicted by others; reviewed needs
+  evidence.
+- `hypothesis`: a novel, falsifiable proposal grounded in claims or findings.
+  - States: proposed → screened (a logged novelty search shows it is not already published) → testing →
+    supported | refuted | inconclusive.
+
+**Retractions cascade.** Move the source to `retracted`. `genome lint` then flags each claim citing it (E510);
+quarantine those claims (`genome move CL-1,CL-7 quarantined --evidence SRC-n`). Lint then flags the findings and
+hypotheses built on them, and the same step repeats one hop at a time, each hop a reviewed step.
+
+**The loop.**
+1. `genome wake`. The QUEUE shows sources to screen, claims to verify, open questions and hypotheses waiting.
+2. Search: `genome new search --set database=PubMed --set query="…" --set hits=212 --link for_question=RQ-1`.
+3. Ingest one paper in **one call**. Write JSON lines and run `genome new --batch claims.jsonl`:
+   - line 1 is the source: `{"kind":"source","title":"Smith 2021","set":{"citation":"…","design":"rct","n":412,"doi":"…"}}`;
+   - each later line is a claim:
+     `{"kind":"claim","title":"EPA lowers viscosity","set":{"quote":"…","locator":"p.4 Table 2","direction":"decreases"},"link":{"cites":"@1","subject":"CO-3","object":"CO-9"}}`;
+   - `@1` is the source made by line 1. A bad line writes nothing.
+4. Verify claims in a separate pass, ideally by another agent, and only against the paper's text. With no text to
+   check against, leave them `extracted` and say so in the report: `verified` is a claim about having checked. Check the quote against the source **and** the
+   numbers and signs in `effect` (a confidence interval's sign and bounds are the commonest slip):
+   `genome move CL-12,CL-13 verified --evidence research/sources/SRC-0004-….md`. The evidence is the source: its file under
+   `research/sources/` if you stored one, otherwise its id (`--evidence SRC-0004`). Verify one source's claims per call. A verified move cannot be corrected afterwards: `disputed` and
+   back to `extracted` is the way.
+5. Synthesise: `genome new finding --title "…" --set statement="…" --set certainty=moderate --link supported_by=CL-12,CL-13`.
+6. Discover:
+   - `genome graph gaps --kind concept`: Swanson ABC. A and C share intermediate concepts B but no claim links
+     A to C. Gaps are computed from claims only: a hypothesis's `bridges`, `via` and `grounded_in` are proposals and
+     provenance, so they do not close a gap (otherwise a hypothesis would confirm itself).
+   - `genome graph gaps --kind concept --across type`: the same, kept to pairs of different types (drug ↔ disease).
+   - `genome graph hubs --kind concept` shows the central mechanisms; `genome graph bridges --kind concept`
+     shows single-mechanism links.
+   - `genome find finding --where consistency=inconsistent` lists contradictions, which also seed hypotheses.
+7. Propose: `genome new hypothesis --title "…" --set statement="…" --set origin=abc-gap --set prediction="…" --set
+   test="…" --link grounded_in=CL-12,FI-3 --link bridges=CO-3,CO-21 --link via=CO-9`.
+   - Before `screened`, run and log a novelty search: `genome move HY-2 screened --evidence SR-0031`. The evidence must
+     be a `search` with `executed=yes`; a search you could not run is logged with `executed=no` and the hypothesis
+     stays `proposed`. (A mistaken `screened` goes back with `genome move HY-2 proposed`.)
+8. `genome close`: lint covers the schema, taint, citations and evidence.
+
+**Retracted or unusable evidence.** A finding or hypothesis cannot rest on a quarantined claim; that is the point.
+Record why a paper was set aside in the source's `--body`, and the consequence in `genome log`. Before moving a
+retracted source, `genome impact SRC-0001 --to retracted` lists every claim, finding and hypothesis that would be
+flagged, hop by hop, with the move commands. If nothing is left standing, there is no finding: the question stays open
+and the log says why. Enum values for every
+field are in `genome blueprint show literature-research`.
+
+**Token rules.** Never paste a paper into the genome: extract claims with their locators. Read claims with
+`genome show CL-n,CL-m`, and query with `find` and `graph`. For bulk work, write one batch file per paper (`@N` is the
+1-based line number, and a link value is an id, `"A,B"` or a list).
+'''
+
+[kinds.question]
+path = "research/questions"
+id = "RQ-{n:03}"
+fields = { type = "enum:therapy|etiology|diagnosis|prognosis|mechanism|discovery!", population = "text", intervention = "text", comparator = "text", outcome = "text" }
+states = ["open", "answered", "dropped"]
+transitions = { open = ["answered", "dropped"], answered = ["open"], dropped = ["open"] }
+evidence_on = ["answered"]
+[kinds.question.relations]
+answered_by = { to = "finding", required_in = ["answered"], graph = false, inverse = "answers" }
+
+[kinds.search]
+path = "research/searches.jsonl"
+store = "jsonl"
+id = "SR-{n:04}"
+fields = { database = "text!", query = "text!", executed = "enum:yes|no!", hits = "int", screened = "int", included = "int", date = "date" }
+[kinds.search.relations]
+for_question = { to = "question|hypothesis", graph = false, inverse = "searched-by" }
+
+[kinds.source]
+path = "research/sources"
+id = "SRC-{n:04}"
+fields = { citation = "text!", design = "enum:meta-analysis|systematic-review|rct|cohort|case-control|cross-sectional|case-series|case-report|animal|in-vitro|in-silico|mechanistic|narrative-review|guideline|preprint|other!", doi = "text", pmid = "text", year = "int:1800..2100", n = "int", population = "text", funding = "text", file = "text" }
+states = ["queued", "screened", "included", "excluded", "retracted"]
+transitions = { queued = ["screened", "excluded"], screened = ["included", "excluded"], excluded = ["screened"] }
+quarantine = "retracted"
+[kinds.source.relations]
+found_by = { to = "search", graph = false, inverse = "found" }
+
+[kinds.claim]
+path = "research/claims.jsonl"
+store = "jsonl"
+id = "CL-{n:05}"
+fields = { quote = "text!", locator = "text!", effect = "text", direction = "enum:increases|decreases|no-effect|associated|inverse|mixed|unclear", population = "text" }
+states = ["extracted", "verified", "disputed", "quarantined"]
+transitions = { extracted = ["verified", "disputed"], disputed = ["verified", "extracted"], verified = ["disputed"] }
+evidence_on = ["verified"]
+quarantine = "quarantined"
+[kinds.claim.relations]
+cites = { to = "source", min = 1, max = 1, taint = ["retracted"], inverse = "claim" }
+subject = { to = "concept", min = 1, inverse = "subject-of" }
+object = { to = "concept", inverse = "object-of" }
+
+[kinds.concept]
+path = "research/concepts"
+id = "CO-{n:04}"
+fields = { type = "enum:drug|gene|protein|pathway|disease|symptom|mechanism|outcome|biomarker|exposure|intervention|population|organism|tissue|other!", ontology_id = "text", synonyms = "text" }
+states = ["candidate", "normalised", "merged"]
+transitions = { candidate = ["normalised", "merged"], normalised = ["merged"] }
+[kinds.concept.relations]
+is_a = { to = "concept", inverse = "kind" }
+part_of = { to = "concept", inverse = "has-part" }
+same_as = { to = "concept", max = 1, required_in = ["merged"], graph = false, inverse = "alias" }
+
+[kinds.finding]
+path = "research/findings"
+id = "FI-{n:04}"
+fields = { statement = "text!", certainty = "enum:high|moderate|low|very-low!", consistency = "enum:consistent|inconsistent|unclear", applies_to = "text" }
+states = ["draft", "reviewed", "superseded", "quarantined"]
+transitions = { draft = ["reviewed", "superseded"], reviewed = ["superseded", "draft"] }
+evidence_on = ["reviewed"]
+quarantine = "quarantined"
+[kinds.finding.relations]
+supported_by = { to = "claim", min = 1, taint = ["quarantined"], inverse = "supports" }
+contradicted_by = { to = "claim", inverse = "contradicts" }
+about = { to = "concept", inverse = "finding" }
+supersedes = { to = "finding", graph = false, inverse = "superseded-by" }
+
+[kinds.hypothesis]
+path = "research/hypotheses"
+id = "HY-{n:04}"
+fields = { statement = "text!", origin = "enum:abc-gap|contradiction|mechanism|analogy|operator!", prediction = "text", test = "text", novelty = "text" }
+states = ["proposed", "screened", "testing", "supported", "refuted", "inconclusive", "parked", "quarantined"]
+transitions = { proposed = ["screened", "parked"], screened = ["testing", "parked", "proposed"], testing = ["supported", "refuted", "inconclusive"], parked = ["proposed"], inconclusive = ["testing"] }
+evidence_on = ["screened", "supported", "refuted", "inconclusive"]
+evidence_ref = { screened = "search?executed=yes" }
+human_only = ["supported"]
+quarantine = "quarantined"
+[kinds.hypothesis.relations]
+grounded_in = { to = "claim|finding", min = 1, taint = ["quarantined"], graph = false, inverse = "grounds" }
+bridges = { to = "concept", graph = false, inverse = "bridged-by" }
+via = { to = "concept", graph = false, inverse = "mediates" }
+
+[views.to-screen]
+kind = "source"
+state = "queued"
+wake = true
+
+[views.to-verify]
+kind = "claim"
+state = "extracted"
+wake = true
+
+[views.open-questions]
+kind = "question"
+state = "open"
+wake = true
+
+[views.hypotheses-in-play]
+kind = "hypothesis"
+where = ["state!=refuted", "state!=parked", "state!=quarantined", "state!=supported"]
+wake = true
+
+[views.findings]
+kind = "finding"
+where = ["state!=quarantined", "state!=superseded"]
+columns = ["id", "certainty", "consistency", "title"]
+into = "docs/EVIDENCE.md#findings"
+
+[views.source-counts]
+kind = "source"
+group_count = true
+into = "docs/EVIDENCE.md#source-counts"
+
+[views.claim-counts]
+kind = "claim"
+group_count = true
+into = "docs/EVIDENCE.md#claim-counts"
+
+[views.hypothesis-counts]
+kind = "hypothesis"
+group_count = true
+into = "docs/EVIDENCE.md#hypothesis-counts"

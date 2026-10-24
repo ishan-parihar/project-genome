@@ -1,0 +1,648 @@
+{
+  "skill_name": "project-genome",
+  "fixtures": "python3 evals/make_fixtures.py /var/tmp/genome-eval new old  (one repo per eval and config; {cfg} = new|old)",
+  "evals": [
+    {
+      "id": 5,
+      "name": "research-coldstart",
+      "prompt": "I'm starting a research repo at /var/tmp/genome-eval/e5-research-coldstart-{cfg} — demand-forecasting experiments (pyproject.toml, experiments/run_sweep.py writes result JSONs). We've been burned before by stale numbers quoted in docs and by re-trying ideas we already killed. Set up the project knowledge base so any agent can pick up cold and keep it honest.",
+      "expected_output": "A research-grade genome: config with research modules; homes for hypotheses (verdict, evidence, re-open condition), invalidated figures, pre-registrations, an evidence store; evidence-class rule for figures; a check run clean; nothing pre-existing modified.",
+      "files": [],
+      "assertions": [
+        "The KB has a home for tested ideas whose rows carry a verdict, an evidence path and a re-open condition",
+        "The KB has a register for invalidated figures that tooling or a stated rule keeps out of live docs",
+        "The KB states that every quoted figure carries an evidence class or cites the artefact that produced it",
+        "The KB has a mechanism to freeze a confirmatory test spec before it runs",
+        "A consistency check of the KB was run and its result is shown, with no errors",
+        "pyproject.toml, experiments/run_sweep.py and README.md are byte-identical to the fixture"
+      ],
+      "checks": [
+        {
+          "name": "consistency check clean",
+          "cmd": "genome lint",
+          "exit": 0
+        },
+        {
+          "unchanged": [
+            "pyproject.toml",
+            "experiments/run_sweep.py",
+            "README.md"
+          ]
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "name": "resume-cheap",
+      "prompt": "Context was just compacted. The repo is /var/tmp/genome-eval/e6-resume-cheap-{cfg}. Pick up where we left off: tell me the exact next task, its acceptance test, and whether anything is waiting on me (the operator). Keep it cheap — this repo's docs are big and I don't want you burning context reading all of them.",
+      "expected_output": "Next task V1 (H1 conditional runner, extend managed_path); acceptance ≥ 5/6 refits and pooled ΔR LB > 0; Q1 (shadow forward log) open for the operator, Q2 already ruled; achieved without reading the 78 KB plan or 35 KB contract whole.",
+      "files": [],
+      "assertions": [
+        "Names V1, the H1 conditional runner (extending managed_path in scripts/excursion_store.py), as the next task",
+        "States the acceptance test: the lift keeps its sign in at least 5 of 6 refits and pooled ΔR LB > 0",
+        "Says Q1 (the shadow forward log question) is waiting on the operator and does not present Q2 as pending",
+        "The answer is saved to outputs/answer.md"
+      ]
+    },
+    {
+      "id": 7,
+      "name": "invalidated-figure",
+      "prompt": "In /var/tmp/genome-eval/e7-invalidated-figure-{cfg}: we just found that the compression_h1 result (+6.9%/mo LB) was selection-biased — universe DSR 0.03 over 21,578 trials, see evidence/dsr_audit.json. Make sure no agent ever quotes that figure as current again, and record what we learned so nobody re-tries the same selection without new evidence.",
+      "expected_output": "Figure registered as invalid (with reason and evidence path), struck from live surfaces, guarded by a check; the compression_h1 idea closed as rejected with the evidence path and a re-open condition; nothing deleted; check clean.",
+      "files": [],
+      "assertions": [
+        "'+6.9%/mo' no longer appears in docs/PROGRESS.md, docs/notes/funnel.md or AGENTS.md except where explicitly labelled invalidated/quarantined",
+        "A register entry names the figure, why it is invalid and evidence/dsr_audit.json",
+        "The compression_h1 idea is recorded as rejected with evidence/dsr_audit.json and a re-open condition",
+        "A mechanism (lint rule or explicit check) will flag the figure if it is quoted again",
+        "No file was deleted outright (moved/archived is fine)",
+        "A consistency check of the KB was run with no errors"
+      ]
+    },
+    {
+      "id": 8,
+      "name": "consolidate-records",
+      "prompt": "In /var/tmp/genome-eval/e8-consolidate-records-{cfg}: the three regressions QX-RG-010, QX-RG-014 and QX-RG-022 all govern one topic — evidence integrity. Consolidate them into a single owner record without breaking the citation of QX-RG-014 in scripts/excursion_store.py, and keep the history.",
+      "expected_output": "One active owner RG carrying the three laws with their source IDs; the other two archived with SupersededBy; an ID map (or relinked citation) keeps QX-RG-014 resolvable; index of records regenerated; check clean.",
+      "files": [],
+      "assertions": [
+        "Exactly one active regression record governs evidence integrity and carries all three laws, each with its source ID",
+        "The absorbed records still exist (archived), each marked superseded with a pointer to the owner",
+        "The QX-RG-014 citation in scripts/excursion_store.py resolves: relinked to the owner or mapped by an ID map",
+        "A records index lists the active records and maps the retired IDs to their owner",
+        "A consistency check of the KB was run with no errors"
+      ]
+    },
+    {
+      "id": 9,
+      "name": "custom-kb-mind-topology",
+      "prompt": "In /var/tmp/genome-eval/e9-custom-kb-{cfg} I want a private knowledge base for mapping my own mind: recurring thoughts (engrams) that can trigger each other or an emotion, with a lifecycle from captured to integrated, where 'integrated' needs a session note as evidence and nothing I have not signed off myself becomes 'canonical'. I want to ask where a new thought lands and which thoughts are leverage points. Set it up so any agent can work in it.",
+      "expected_output": "A genome with declared kinds (engram, emotion) with states, transitions, evidence_on and human_only, typed relations; entities created through `genome new`; lint clean; privacy local; a graph query answered.",
+      "files": [],
+      "assertions": [
+        "Entities have a declared lifecycle that the tooling enforces on write, not only a description of one",
+        "Moving an entity to a state that needs evidence without evidence is refused",
+        "The human-only state cannot be reached by an agent command without a named human sign-off",
+        "Thoughts can be linked with typed relations and a graph query (hubs, path or gaps) was run",
+        "The knowledge base is marked private so it never enters a federation card",
+        "A consistency check was run and shows no errors"
+      ],
+      "checks": [
+        {
+          "name": "lint clean",
+          "cmd": "genome lint",
+          "exit": 0
+        },
+        {
+          "name": "two or more kinds declared",
+          "cmd": "genome find engram",
+          "exit": 0
+        },
+        {
+          "name": "private",
+          "cmd": "genome card",
+          "exit": 2,
+          "stdout_lacks": "card:"
+        },
+        {
+          "unchanged": [
+            "README.md"
+          ]
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "name": "federation-drift",
+      "prompt": "/var/tmp/genome-eval/e10-federation-{cfg}/meta is a meta-directory over two repos, alpha and bravo, each with a genome. docs/ARCHITECTURE.md in alpha describes src/. Make the meta root able to answer 'which repo handles the coolant pump' without walking the repos, and make alpha's architecture doc report itself stale when src/ changes after someone last reviewed it. Do not write into bravo.",
+      "expected_output": "Cards built into a cache; ask --all answers with a repo: pointer; alpha's manual declares covers and verified; a code change makes lint report it stale; bravo's tree unchanged.",
+      "files": [],
+      "assertions": [
+        "A cross-repo question is answered from cards, with a repo:<name>#<class> pointer",
+        "The architecture doc declares what it covers and the commit it was verified at",
+        "Changing a covered file makes the checker report the doc as stale; an unrelated change does not",
+        "bravo's working tree is unchanged",
+        "The checker warns rather than blocks at first"
+      ],
+      "checks": [
+        {
+          "name": "ask --all answers",
+          "cmd": "GENOME_CARDS=$PWD/../.cards genome ask --all coolant pump",
+          "exit": 0,
+          "stdout_has": "repo:alpha"
+        },
+        {
+          "name": "bravo untouched",
+          "cmd": "git -C bravo status --porcelain",
+          "exit": 0,
+          "stdout_lacks": "??"
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "name": "upgrade-no-regressions",
+      "prompt": "/var/tmp/genome-eval/e11-upgrade-{cfg} vendors an older copy of the genome CLI in scripts/genome (it has no `upgrade` command) and its genome lints clean. Bring it to the skill's current version. Nothing that was green may turn red, and I must be able to get back to the old copy.",
+      "expected_output": "scripts/genome replaced by the skill version (the doctor hint says how); `genome migrate` stamps schema_version; lint still clean; the old copy recoverable from git or a backup; later upgrades use `genome upgrade`.",
+      "files": [],
+      "assertions": [
+        "The upgrade followed the instructions the old CLI itself prints (doctor), not a guess",
+        "The previous CLI remains recoverable (git history or a backup)",
+        "genome.toml carries a schema_version afterwards (`genome migrate` was run)",
+        "lint is clean before and after, with identical findings",
+        "Nothing else in the repo changed"
+      ],
+      "checks": [
+        {
+          "name": "lint clean",
+          "cmd": "python3 scripts/genome lint",
+          "exit": 0
+        },
+        {
+          "name": "schema stamped",
+          "cmd": "grep -q schema_version genome.toml",
+          "exit": 0
+        },
+        {
+          "name": "new CLI has upgrade",
+          "cmd": "python3 scripts/genome upgrade",
+          "exit": 0
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "name": "mind-map-loop",
+      "prompt": "In /var/tmp/genome-eval/e12-mind-{cfg} I want to map my own inner world with you, over several sessions, and keep it private on this machine. Three things from today, in my words: (1) 'When a room full of people looks at me I freeze and my chest goes tight.' (2) 'So I avoid rooms like that, I make excuses, I stay home.' (3) 'The more I avoid them, the more I believe I can't handle being looked at.' Set up what is needed, record these as I said them, and show me whether they form a pattern and where the leverage might be. Do not tell me what any of it means as if it were settled, and do not mark anything as resolved: that is mine to say.",
+      "expected_output": "A private mind-topology genome; three engrams/processes in the operator's words linked by typed causal edges; a self-feeding loop found by a graph query; any interpretation recorded as a proposed insight; nothing untangled or confirmed.",
+      "files": [],
+      "assertions": [
+        "The operator's words are stored verbatim, not paraphrased into interpretation",
+        "The avoid-and-believe-worse loop was offered as a proposed insight for the operator to confirm; no causal edge the operator did not state was written",
+        "Interpretations are recorded as proposals that await the operator",
+        "Nothing is marked untangled, integrated or confirmed",
+        "The map is private: no card is published and a git remote would block close",
+        "Calls were few: entries created with their links in one command, orientation by one command"
+      ],
+      "checks": [
+        {
+          "name": "lint clean",
+          "cmd": "genome lint",
+          "exit": 0
+        },
+        {
+          "name": "engrams recorded",
+          "cmd": "genome find engram",
+          "exit": 0,
+          "stdout_has": "EN-"
+        },
+        {
+          "name": "the loop is proposed, not asserted",
+          "cmd": "genome find insight --state proposed",
+          "exit": 0,
+          "stdout_has": "IN-"
+        },
+        {
+          "name": "verbatim",
+          "cmd": "grep -rlq 'room full of people looks at me' map/",
+          "exit": 0
+        },
+        {
+          "name": "nothing confirmed",
+          "cmd": "genome find insight --state confirmed",
+          "exit": 0,
+          "stdout_lacks": "IN-"
+        },
+        {
+          "name": "nothing untangled",
+          "cmd": "genome find engram --state untangled",
+          "exit": 0,
+          "stdout_lacks": "EN-"
+        },
+        {
+          "name": "private",
+          "cmd": "genome card",
+          "exit": 2
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "name": "two-people-leverage",
+      "prompt": "/var/tmp/genome-eval/e13-intersubjective-{cfg} holds my private map (read `genome wake`). I want to include my partner Alex. Two exchanges from this week, as I experienced them: (a) I asked 'did you do the dishes?' in a sharp tone and Alex said 'fine, I'll do everything then' (a sulky tone). (b) Alex went silent for the evening and I kept asking if something was wrong, which made Alex go quieter. Alex has not been asked whether they are okay being in my map. Add Alex and these exchanges, and tell me what the two of us are doing to each other that neither map would show alone, and where a single change might shift it. Offer it as something to check with Alex, not as fact about Alex.",
+      "expected_output": "Alex as a subject with consent not-asked; exchanges recorded as transactions between two subjects with ego states; Alex's behaviour recorded as seen by the operator; a cross-map loop found with --across; a pattern proposed but not named; the map stays local.",
+      "files": [],
+      "assertions": [
+        "Alex's entries are marked as the operator's perception, not as Alex's account",
+        "Alex's consent is recorded as not asked, and nothing was published",
+        "The pursue-withdraw loop was found by a cross-map graph query",
+        "The pattern is a suspicion until the operator names it",
+        "The conclusion is offered as a hypothesis to check with Alex"
+      ],
+      "checks": [
+        {
+          "name": "lint clean",
+          "cmd": "genome lint",
+          "exit": 0
+        },
+        {
+          "name": "Alex added",
+          "cmd": "genome find subject",
+          "exit": 0,
+          "stdout_has": "SU-02"
+        },
+        {
+          "name": "exchanges recorded",
+          "cmd": "genome find transaction",
+          "exit": 0,
+          "stdout_has": "TR-"
+        },
+        {
+          "name": "cross-map loop",
+          "cmd": "genome graph cycles --across of",
+          "exit": 0,
+          "stdout_has": "⟲"
+        },
+        {
+          "name": "consent not assumed",
+          "cmd": "genome show SU-02",
+          "exit": 0,
+          "stdout_lacks": "consent: given"
+        },
+        {
+          "name": "pattern not named",
+          "cmd": "genome find pattern --state named",
+          "exit": 0,
+          "stdout_lacks": "PT-"
+        },
+        {
+          "name": "private",
+          "cmd": "genome card",
+          "exit": 2
+        }
+      ]
+    },
+    {
+      "id": 14,
+      "name": "papers-to-hypothesis",
+      "prompt": "/var/tmp/genome-eval/e14-literature-{cfg}/papers holds three papers (synthetic, for this exercise). I want an autonomous research base on whether dietary interventions could affect circulatory conditions. Ingest the papers so every claim is traceable to the exact words and place in the source, synthesise what the evidence says and how certain it is, and then look for connections no single paper states: propose a novel hypothesis only if you can ground it, check that it has not already been published, and say how it could be tested. This is not medical advice and I will decide what counts as supported.",
+      "expected_output": "A literature-research genome; sources, verbatim claims with locators, normalised concepts, a graded finding; a retracted paper recognised and kept out of the evidence; a hypothesis found by the graph (fish oil to Raynaud via blood viscosity), grounded, with a logged novelty search and a test; nothing marked supported.",
+      "files": [],
+      "assertions": [
+        "Every claim quotes its source verbatim with a locator",
+        "The retracted paper is marked retracted and none of its claims support a finding or hypothesis",
+        "The fish-oil to Raynaud's connection came from a graph query over concepts, not from reading",
+        "The finding carries a certainty grade",
+        "A novelty search was logged before the hypothesis was screened",
+        "No hypothesis is marked supported",
+        "Each paper went in with one command, not one command per claim"
+      ],
+      "checks": [
+        {
+          "name": "lint clean",
+          "cmd": "genome lint",
+          "exit": 0
+        },
+        {
+          "name": "quotes are verbatim",
+          "cmd": "python3 -c \"import json,pathlib,re,sys; t=' '.join(p.read_text() for p in pathlib.Path('papers').glob('*.md')); t=re.sub(r'\\s+',' ',t); ev=[json.loads(l) for l in open('research/claims.jsonl') if l.strip()]; q=[e['fields']['quote'] for e in ev if e.get('op')=='new']; bad=[x for x in q if re.sub(r'\\s+',' ',x) not in t]; print(len(q),'claims',len(bad),'not verbatim'); sys.exit(1 if bad or not q else 0)\"",
+          "exit": 0
+        },
+        {
+          "name": "retraction recognised",
+          "cmd": "genome find source --state retracted",
+          "exit": 0,
+          "stdout_has": "SRC-"
+        },
+        {
+          "name": "a hypothesis exists",
+          "cmd": "genome find hypothesis",
+          "exit": 0,
+          "stdout_has": "HY-"
+        },
+        {
+          "name": "novelty searched",
+          "cmd": "genome find search",
+          "exit": 0,
+          "stdout_has": "SR-"
+        },
+        {
+          "name": "nothing supported",
+          "cmd": "genome find hypothesis --state supported",
+          "exit": 0,
+          "stdout_lacks": "HY-"
+        },
+        {
+          "unchanged": [
+            "papers/fish-oil-viscosity.md",
+            "papers/raynaud-viscosity.md",
+            "papers/triglycerides-retracted.md"
+          ]
+        }
+      ]
+    },
+    {
+      "id": 15,
+      "name": "ontology-by-derivation",
+      "prompt": "/var/tmp/genome-eval/e15-ontology-{cfg} is empty. I am building an ontology of how reality is structured, the way a rigorous framework is built: nothing is accepted because it sounds right. Here is input: 'Every level of a nested hierarchy mirrors the structure of the whole.' I also recall that the Hermetic tradition says 'as above, so below', and a systems-biology text describes the same self-similarity in cells and organisms. Take the input through whatever process a careful ontology would: state it, challenge it, see what corroborates it, place it relative to what is already there, and leave open questions. I will decide what becomes canonical.",
+      "expected_output": "An ontology genome; the input as a draft thesis with declared scope; derived from an axiom or concept when one exists (otherwise left ai-draft with a joint), never from the traditions; the traditions as witnesses that corroborate; a red-team thesis; open joints; nothing canonical.",
+      "files": [],
+      "assertions": [
+        "The Hermetic and biology sources are witnesses that corroborate, never premises; with no axiom to derive from, the thesis stays ai-draft and a joint names the missing grounding",
+        "A red-team (antithesis) was written and kept, not deleted",
+        "The thesis declares its scope",
+        "Open questions were recorded as joints",
+        "Nothing is canonical: that step waits for the operator",
+        "The catalyst went through the protocol phases in order"
+      ],
+      "checks": [
+        {
+          "name": "lint clean",
+          "cmd": "genome lint",
+          "exit": 0
+        },
+        {
+          "name": "a thesis exists",
+          "cmd": "genome find thesis",
+          "exit": 0,
+          "stdout_has": "TH-"
+        },
+        {
+          "name": "witnesses recorded",
+          "cmd": "genome find witness",
+          "exit": 0,
+          "stdout_has": "WI-"
+        },
+        {
+          "name": "nothing stands above ai-draft without premises",
+          "cmd": "genome find thesis --state canonical-hypothesis",
+          "exit": 0,
+          "stdout_lacks": "TH-"
+        },
+        {
+          "name": "joints left open",
+          "cmd": "genome find joint",
+          "exit": 0,
+          "stdout_has": "J-"
+        },
+        {
+          "name": "nothing canonical",
+          "cmd": "genome find thesis --state canonical",
+          "exit": 0,
+          "stdout_lacks": "TH-"
+        }
+      ]
+    },
+    {
+      "id": 16,
+      "name": "custom-incident-kb",
+      "prompt": "In /var/tmp/genome-eval/e16-custom-sre-{cfg} (an empty git repo): I run an SRE team. I want a durable knowledge base for production incident postmortems, built so agents can work in it over many sessions without me re-explaining. Incidents have a timeline, contributing factors, and action items. An action item must never be marked done without evidence, and nobody but a human on my team may declare an incident 'closed'. A contributing factor that turns out to be misidentified must flag every action item that was built on it. I want to ask questions like 'which components keep showing up across incidents' and 'which factors are the leverage points'. Set it up, and record this one incident to prove it works: on 2026-03-02 the payments API returned 503s for 41 minutes because a config push set the DB pool size to 5 instead of 50; the push passed review because the diff tool collapsed the file; we rolled back at 14:12 UTC. Action items: add a pool-size lower bound check in CI (owner: dana), and make the diff tool expand config files (owner: lee).",
+      "expected_output": "A custom blueprint authored with the kit and passing `blueprint check`; kinds for incident, timeline event, factor, action item (and component); closed human-only, done needing evidence, a taint from a misidentified factor to its action items; the one incident recorded, with the rules proven by refusals; graph queries for recurring components.",
+      "files": [],
+      "assertions": [
+        "The blueprint was written with `blueprint new` and passed `blueprint check` before it was applied",
+        "Closing an incident and completing an action item are gated in the schema, not in prose",
+        "A misidentified factor flags the action items built on it (taint with a quarantine state)",
+        "The incident, its timeline, factors, action items and components were created in few calls (batch with @N links)",
+        "The agent said that --human is a record rather than a lock, or did not run the human-only move itself"
+      ],
+      "checks": [
+        {
+          "name": "lint clean",
+          "cmd": "genome lint",
+          "exit": 0
+        },
+        {
+          "name": "the blueprint passes its own check",
+          "cmd": "genome blueprint check genome/blueprints/*.toml",
+          "exit": 0,
+          "stdout_has": "PASS"
+        },
+        {
+          "name": "the incident is recorded",
+          "cmd": "grep -rqiE 'pool' --exclude-dir=.git --exclude-dir=genome .",
+          "exit": 0
+        },
+        {
+          "name": "nothing closed by an agent",
+          "cmd": "grep -rqE 'state: closed|\"state\": *\"closed\"' --exclude-dir=.git --exclude-dir=genome .",
+          "exit": 1
+        }
+      ]
+    },
+    {
+      "id": 17,
+      "name": "family-triangle",
+      "prompt": "In /var/tmp/genome-eval/e17-triangle-{cfg} (an empty git repo): I want to map a family dynamic privately, with you, over several sessions. It's me, my mother and my younger brother. In my words: (1) 'When mum and I argue, my brother always shows up and takes her side and then I feel like the outsider.' (2) 'Mum says he's the only one who understands her; I think she says that to make me jealous.' (3) 'I start sulking, and then mum gets more attentive to him, which makes me sulk more.' (4) 'My brother told me once that he feels like he has to keep the peace or everything falls apart.' Set up what's needed, record these, show me which patterns cross between people versus staying inside one person, and where the leverage is. I don't want conclusions stated as fact, especially about what my mum or brother 'really' feel, and I haven't asked them whether they're OK being in this.",
+      "expected_output": "An intersubjective genome, private; three subjects with consent not-asked; the operator's four statements as their perception; a loop that crosses people found by `graph cycles --across of`; leverage from bridges/hubs; no pattern named, nothing about others' inner states stated as fact.",
+      "files": [],
+      "assertions": [
+        "Mum and the brother are subjects with consent not-asked, never given",
+        "Statements about their inner states are worded as the operator's perception or left unlinked",
+        "The cross-person loop came from a graph query",
+        "No pattern was named and no entry was confirmed",
+        "The map is private: no card, no remote"
+      ],
+      "checks": [
+        {
+          "name": "lint clean",
+          "cmd": "genome lint",
+          "exit": 0
+        },
+        {
+          "name": "two other people",
+          "cmd": "genome find subject",
+          "exit": 0,
+          "stdout_has": "SU-03"
+        },
+        {
+          "name": "cross-map loop",
+          "cmd": "genome graph cycles --across of",
+          "exit": 0,
+          "stdout_has": "⟲"
+        },
+        {
+          "name": "consent not assumed",
+          "cmd": "genome find subject --where consent=given",
+          "exit": 0,
+          "stdout_lacks": "SU-02"
+        },
+        {
+          "name": "pattern not named",
+          "cmd": "genome find pattern --state named",
+          "exit": 0,
+          "stdout_lacks": "PT-"
+        },
+        {
+          "name": "private",
+          "cmd": "genome card",
+          "exit": 2
+        }
+      ]
+    },
+    {
+      "id": 18,
+      "name": "retraction-and-honest-search",
+      "prompt": "In /var/tmp/genome-eval/e18-retraction-{cfg} (an empty git repo; no internet access): I'm doing literature-based discovery. Three papers. Paper A (Lee 2019, RCT, n=88): 'Magnesium supplementation reduced serum CRP by 1.9 mg/L (95% CI 0.8 to 3.0, p=0.002) versus placebo' (Table 3, p.6). Paper B (Okafor 2021, cohort, n=1,204): 'Chronic low-grade inflammation, indexed by CRP, was associated with a 1.6-fold higher risk of migraine with aura (HR 1.6, 95% CI 1.2 to 2.1)' (Results, p.4). Paper C (Voss 2022, in-vitro): 'Magnesium blocked NMDA receptor-mediated calcium influx in cortical neurons' (Figure 2). Later I learned Paper A was retracted in 2024 for data fabrication (notice: https://example.org/retraction/lee2019). Set up a research base, ingest the papers, tell me what the evidence supports and how certain it is, tell me what the retraction affects, and propose at most one novel testable hypothesis that connects magnesium to migraine, checking whether it is already published. You can't search PubMed offline, so be honest about that. I will decide what counts as supported.",
+      "expected_output": "A literature-research genome; claims with locators; Paper A retracted and its claim quarantined with no finding resting on it; findings with GRADE certainty; one hypothesis left `proposed` because the novelty search could not be executed and is logged executed=no; nothing supported.",
+      "files": [],
+      "assertions": [
+        "The retraction was previewed or followed through the cascade (impact, quarantine) rather than ignored",
+        "No finding or hypothesis rests on the quarantined claim",
+        "The unexecuted search is logged as executed=no and the hypothesis is not screened",
+        "Claims the agent could not check against paper text were not marked verified",
+        "Nothing is supported"
+      ],
+      "checks": [
+        {
+          "name": "lint clean",
+          "cmd": "genome lint",
+          "exit": 0
+        },
+        {
+          "name": "retraction recorded",
+          "cmd": "genome find source --state retracted",
+          "exit": 0,
+          "stdout_has": "SRC-"
+        },
+        {
+          "name": "its claim quarantined",
+          "cmd": "genome find claim --state quarantined",
+          "exit": 0,
+          "stdout_has": "CL-"
+        },
+        {
+          "name": "a hypothesis exists",
+          "cmd": "genome find hypothesis",
+          "exit": 0,
+          "stdout_has": "HY-"
+        },
+        {
+          "name": "not screened on a search that was not run",
+          "cmd": "genome find hypothesis --state screened",
+          "exit": 0,
+          "stdout_lacks": "HY-"
+        },
+        {
+          "name": "nothing supported",
+          "cmd": "genome find hypothesis --state supported",
+          "exit": 0,
+          "stdout_lacks": "HY-"
+        },
+        {
+          "name": "claims not verified without the text",
+          "cmd": "genome find claim --state verified",
+          "exit": 0,
+          "stdout_lacks": "CL-"
+        }
+      ]
+    },
+    {
+      "id": 19,
+      "name": "ontology-with-axiom",
+      "prompt": "In /var/tmp/genome-eval/e19-ontology-axiom-{cfg} (a git repo already initialised as an ontology genome with one adopted axiom): I'm building an ontology of how reality is structured, rigorously: nothing is accepted because it sounds right. The adopted axiom AX-001 is 'Reality is one undivided whole'. Input: 'Distinction between things is a property of description, not of reality.' Take it through a careful process: state it as a thesis, derive it from the axiom, challenge it with a real counter-thesis, add this corroboration that I recall (Nagarjuna, Mulamadhyamakakarika, ch. 24: 'Whatever is dependently co-arisen, that is explained to be emptiness') in its own voice and honest about whether the quote was checked against the text (it was not: I recalled it), place it among the concepts (create the concepts holon and distinction), and leave open what is unresolved. Then the operator reviews: later this session, tell me what I need to run to promote it, but do not promote it yourself. Finally, I decide AX-001 is wrong and retire it: show me what that breaks. Do not sign off on anything human-only yourself.",
+      "expected_output": "A thesis derived from AX-001 by a derivation, a real antithesis linked red_team_of, a witness left `noted` (unchecked), concepts, open joints; nothing canonical; AX-001 still adopted; the retirement's cascade shown with `genome impact` and the operator's commands named.",
+      "files": [],
+      "assertions": [
+        "The thesis is derived from the axiom, not from the witness",
+        "The recalled quote stays `noted`; the catalyst does not pass `corroborated` on it",
+        "The retirement was previewed with `genome impact`, not performed",
+        "The operator's promotion commands name the derivation first, then the thesis",
+        "No human-only move was run by the agent"
+      ],
+      "checks": [
+        {
+          "name": "lint clean",
+          "cmd": "genome lint",
+          "exit": 0
+        },
+        {
+          "name": "a derivation from the axiom",
+          "cmd": "genome show DV-0001",
+          "exit": 0,
+          "stdout_has": "AX-001"
+        },
+        {
+          "name": "a real antithesis",
+          "cmd": "genome show TH-0001",
+          "exit": 0,
+          "stdout_has": "red-teamed-by"
+        },
+        {
+          "name": "the quote stays unchecked",
+          "cmd": "genome find witness --state verified",
+          "exit": 0,
+          "stdout_lacks": "WI-"
+        },
+        {
+          "name": "nothing canonical",
+          "cmd": "genome find thesis --state canonical",
+          "exit": 0,
+          "stdout_lacks": "TH-"
+        },
+        {
+          "name": "axiom not retired by the agent",
+          "cmd": "genome find axiom --state retired",
+          "exit": 0,
+          "stdout_lacks": "AX-"
+        },
+        {
+          "name": "joints left open",
+          "cmd": "genome find joint",
+          "exit": 0,
+          "stdout_has": "J-"
+        }
+      ]
+    },
+    {
+      "id": 20,
+      "name": "venture-pipeline-lanes",
+      "prompt": "In /var/tmp/genome-eval/e20-venture-pipeline-{cfg} (a git repo with a README and nothing else): I run three lanes for paid work: remote job applications, freelance gigs, and architecture leads from builder, SMB and homeowner signals. Set up the project knowledge base so any agent can pick it up cold: which lane loses hours this week, which applications and gigs need me now, and the difference between a trigger and a lead. Every send, reply and win must be recorded in order, and I will confirm wins myself.",
+      "expected_output": "The built-in venture-pipeline blueprint applied with `genome init --blueprint venture-pipeline`, passing `genome blueprint check venture-pipeline`. Three ladders (application, gig, lead) and one append-only outcome ledger. A trigger is never counted as a lead; a lead cannot reach contacted without a linked person and an outcome row about it. closed-won and won are set only with --human, and the agent did not set them.",
+      "files": [],
+      "assertions": [
+        "The agent applied the built-in venture-pipeline blueprint with `genome init --blueprint venture-pipeline` rather than hand-writing the kinds",
+        "A lead with no named person stays in trigger, and the triggers view lists it apart from leads",
+        "Moving a lead to contacted needs a person linked to it and an outcome row about it as evidence; the agent did not work around either",
+        "The agent did not record a win: closed-won and won were left unset, or the agent said that --human is the operator's call",
+        "The agent did not invent a lane score: it said that docs/PIPELINE.md is written weekly by the score script, or left it to the operator"
+      ],
+      "checks": [
+        {
+          "name": "lint clean",
+          "cmd": "genome lint",
+          "exit": 0
+        },
+        {
+          "name": "blueprint passes its own check",
+          "cmd": "genome blueprint check venture-pipeline",
+          "exit": 0,
+          "stdout_has": "PASS"
+        },
+        {
+          "name": "the outcome ledger is present",
+          "cmd": "genome find outcome",
+          "exit": 0
+        },
+        {
+          "name": "no win recorded",
+          "cmd": "genome find outcome --state won",
+          "exit": 0,
+          "stdout_lacks": "OU-"
+        },
+        {
+          "name": "no lead closed-won",
+          "cmd": "genome find lead --state closed-won",
+          "exit": 0,
+          "stdout_lacks": "LD-"
+        },
+        {
+          "name": "no application closed-won",
+          "cmd": "genome find application --state closed-won",
+          "exit": 0,
+          "stdout_lacks": "AP-"
+        }
+      ]
+    }
+  ]
+}

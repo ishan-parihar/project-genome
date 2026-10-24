@@ -1,0 +1,199 @@
+# ontology: mapping the architecture of reality. Axioms anchor, theses derive, witnesses corroborate, joints set the agenda.
+# Shaped on HoloOS (status ladder, theory_doc_v2 derivation patterns, 5-phase catalyst protocol) without its content.
+[blueprint]
+name = "ontology"
+version = "1"
+summary = "axioms → derivations → theses on the ladder ai-draft → canonical-hypothesis → canonical (human-only); witnesses corroborate but never ground; open joints are the agenda"
+modules = ["core", "records"]
+routes = [
+  ["what is canonical, what is hypothesis, what is draft", "`docs/ONTOLOGY.md` (generated)"],
+  ["what to work on next (open joints by priority)", "`genome view agenda` / wake QUEUE"],
+  ["how a thesis is derived, back to its axioms", "`genome graph path TH-n AX-n` / `genome show TH-n`"],
+  ["incoming catalyst and where each is in the protocol", "`ontology/catalysts.jsonl` (`genome find catalyst`)"],
+]
+playbook = '''
+**What this is.** An ontology built by derivation.
+- `axiom`: a trusted anchor. An agent may *propose* one (it stays `proposed`) and derive from it; only a human
+  adopts it, and a human reviews the chain before anything above `ai-draft` stands.
+- `thesis`: a structural claim. It climbs the ladder **ai-draft → canonical-hypothesis → canonical**:
+  - every agent-written thesis starts at `ai-draft`;
+  - `canonical-hypothesis` needs a `derived_by` derivation and, as evidence, a red-team thesis of this very thesis
+    (`red_team_of` pointing at it). Write the antithesis first; if it stands unanswered, open a `joint` for it rather
+    than treating the thesis as having survived;
+  - `canonical` is human-only.
+- `derivation`: the reified "derives from" edge. Its premises are axioms, theses or concepts, and its `pattern`
+  is one of structural-mirroring, fractal-recursion, invariant-vs-decoration, witness-corroboration or none.
+- `witness`: external corroboration (a tradition, a science, a text), kept in its own voice: `quote` plus
+  `locator`. It starts `noted`, which means "quoted but not checked" (a quote recalled from memory stays `noted`);
+  `verified` needs evidence that the words were checked against the text; only then `incorporated`.
+- `concept`: a holon or category in a holarchy (`is_a`, `part_of`, symmetric `mirrors`).
+- `joint`: an open question. Open joints are the research agenda.
+
+**Rules the schema enforces.**
+- **Derive, don't borrow.** A witness can corroborate a thesis (`corroborated_by`) but cannot be a premise. A
+  derivation's `from` does not accept witnesses.
+- **Keep thesis and antithesis.** A red-team is a thesis in its own right (`red_team_of`), written and kept. If the
+  antithesis wins, the red-teamed thesis moves to `superseded` with a `notice` (it is never deleted). If it
+  survives, it advances (loop step 4), citing the antithesis as evidence.
+- **Supersession cascades.** A derivation built on a superseded premise is flagged (E510) and moves to
+  `suspended`. A thesis derived by a suspended derivation is flagged in turn and goes back to `ai-draft` to be
+  re-derived.
+- **Scope is declared.** Every thesis says whether it claims to hold cosmologically, within a domain, or locally.
+
+**Catalyst protocol.** A `catalyst` (append-only) is any incoming input: a user prompt, a red-team, a witness
+incorporation, an open-joint resolution or a framework evolution. It walks five phases, each enforced on write:
+1. `received`.
+2. `articulated`: the claim is stated.
+3. `red-teamed`: thesis and antithesis both recorded; evidence is the antithesis id.
+4. `corroborated`: witnesses checked; evidence is the id of a witness that is `verified` or `incorporated` (an unchecked
+   one is refused, so a recalled quote cannot pass for corroboration). If the witness cannot be checked, the catalyst
+   stays at `red-teamed` and in the queue until someone with the text verifies it; do not `drop` it, which says the
+   input was abandoned. Everything else it produced is already in the graph.
+5. `placed`: the result sits in the graph; evidence is the thesis or joint it produced.
+
+**The loop.**
+1. `genome wake`. The QUEUE shows high-priority open joints, theses awaiting human review, and catalysts in flight.
+2. Log the input: `genome new catalyst --title "…" --set type=user-prompt`. When the thesis exists, link it:
+   `genome link CA-0001 targets TH-0001`, and at the end `genome link CA-0001 produced TH-0001,TH-0002,WI-0001,J-0001`
+   (a catalyst cannot be `placed` before it has produced something).
+3. Draft: `genome new thesis --title "…" --set statement="…" --set scope=domain --link about=CN-4 --link raises=J-0012`.
+   Then derive: `genome new derivation --title "…" --set pattern=structural-mirroring --set steps="…" --link from=AX-001,TH-0003`
+   and `genome link TH-0009 derived_by DV-0004`.
+4. Red-team: write the antithesis, `genome new thesis … --link red_team_of=TH-0009`. Then
+   `genome move DV-0004 red-teamed --evidence TH-0010` and `genome move TH-0009 canonical-hypothesis --evidence TH-0010`.
+5. Corroborate: `genome new witness --title "…" --set tradition="…" --set quote="…" --set locator="…"`, then
+   `genome link TH-0009 corroborated_by WI-0002`.
+6. Place it in the architecture:
+   - `genome graph neighbors TH-0009 --depth 2` shows its surroundings;
+   - `genome graph path TH-0009 AX-001` checks the derivation chain;
+   - `genome graph hubs --kind concept` shows the load-bearing concepts;
+   - `genome graph gaps --kind concept` shows structure implied but not stated, which becomes a new joint;
+   - `genome graph cycles` shows circular derivations, which must be broken.
+7. Before retiring or superseding anything, preview it: `genome impact AX-001 --to retired` lists each entity that
+   would be flagged, hop by hop, with the exact `genome move` that clears each hop. It changes nothing.
+8. Resolve joints with evidence: `genome move J-0012 resolved --evidence TH-0009 && genome link J-0012 resolved_by TH-0009`.
+9. `genome close`. Promotion is the operator's, in this order: `genome move DV-0004 accepted --evidence <review> --human
+   <name>`, then `genome move TH-0009 canonical --evidence <review> --human <name>`. (The schema requires a
+   derivation to exist; accepting it first is the review order, not enforced.) Several relations in one `new`: repeat the
+   flag, `--link about=CN-4 --link raises=J-12`; commas separate targets of one relation only.
+'''
+
+[kinds.axiom]
+path = "ontology/axioms"
+id = "AX-{n:03}"
+mutability = "amendable"
+fields = { statement = "text!", rationale = "text" }
+states = ["proposed", "adopted", "retired"]
+transitions = { proposed = ["adopted"], adopted = ["retired"], retired = ["adopted"] }
+human_only = ["adopted", "retired"]
+
+[kinds.thesis]
+path = "ontology/theses"
+id = "TH-{n:04}"
+mutability = "amendable"
+fields = { statement = "text!", scope = "enum:cosmological|domain|local!", coordinate = "text", notice = "text" }
+states = ["ai-draft", "canonical-hypothesis", "canonical", "superseded"]
+initial = "ai-draft"
+transitions = { ai-draft = ["canonical-hypothesis", "superseded"], canonical-hypothesis = ["canonical", "ai-draft", "superseded"], canonical = ["superseded"] }
+evidence_on = ["canonical-hypothesis", "canonical", "superseded"]
+evidence_ref = { canonical-hypothesis = "thesis?red_team_of=@self" }
+human_only = ["canonical"]
+quarantine = "ai-draft"
+[kinds.thesis.relations]
+derived_by = { to = "derivation", required_in = ["canonical-hypothesis", "canonical"], taint = ["suspended", "rejected"], inverse = "concludes" }
+red_team_of = { to = "thesis", inverse = "red-teamed-by" }
+supersedes = { to = "thesis", inverse = "superseded-by" }
+corroborated_by = { to = "witness", inverse = "corroborates" }
+about = { to = "concept", inverse = "described-by" }
+raises = { to = "joint", inverse = "raised-by" }
+
+[kinds.derivation]
+path = "ontology/derivations"
+id = "DV-{n:04}"
+fields = { pattern = "enum:structural-mirroring|fractal-recursion|invariant-vs-decoration|witness-corroboration|none!", steps = "text" }
+states = ["drafted", "red-teamed", "accepted", "rejected", "suspended"]
+transitions = { drafted = ["red-teamed"], red-teamed = ["accepted", "rejected", "drafted"], suspended = ["drafted"], rejected = ["drafted"] }
+evidence_on = ["red-teamed", "accepted"]
+human_only = ["accepted"]
+quarantine = "suspended"
+[kinds.derivation.relations]
+from = { to = "axiom|thesis|concept", min = 1, taint = ["superseded", "retired"], inverse = "premise-of" }
+
+[kinds.concept]
+path = "ontology/concepts"
+id = "CN-{n:04}"
+fields = { definition = "text!", level = "text", realm = "text" }
+[kinds.concept.relations]
+is_a = { to = "concept", inverse = "kind" }
+part_of = { to = "concept", inverse = "has-part" }
+mirrors = { to = "concept", symmetric = true }
+defined_in = { to = "thesis|axiom", max = 1, graph = false, inverse = "defines" }
+
+[kinds.witness]
+path = "ontology/witnesses"
+id = "WI-{n:04}"
+mutability = "amendable"
+fields = { tradition = "text!", quote = "text!", locator = "text" }
+states = ["noted", "verified", "incorporated"]
+transitions = { noted = ["verified"], verified = ["incorporated"] }
+evidence_on = ["verified", "incorporated"]
+
+[kinds.joint]
+path = "ontology/joints"
+id = "J-{n:04}"
+fields = { question = "text!", priority = "enum:high|medium|low!", series = "text" }
+states = ["open", "partially-resolved", "resolved", "dissolved"]
+transitions = { open = ["partially-resolved", "resolved", "dissolved"], partially-resolved = ["resolved", "dissolved", "open"], resolved = ["open"] }
+evidence_on = ["partially-resolved", "resolved", "dissolved"]
+[kinds.joint.relations]
+resolved_by = { to = "thesis", max = 1, required_in = ["resolved"], inverse = "resolves" }
+concerns = { to = "concept|thesis|axiom", inverse = "joint" }
+
+[kinds.catalyst]
+path = "ontology/catalysts.jsonl"
+store = "jsonl"
+id = "CA-{n:04}"
+fields = { type = "enum:user-prompt|red-team|witness-incorporation|open-joint-resolution|framework-evolution!", summary = "text" }
+states = ["received", "articulated", "red-teamed", "corroborated", "placed", "dropped"]
+transitions = { received = ["articulated", "dropped"], articulated = ["red-teamed", "dropped"], red-teamed = ["corroborated", "dropped"], corroborated = ["placed"] }
+evidence_on = ["red-teamed", "corroborated", "placed"]
+evidence_ref = { corroborated = "witness?state=verified|incorporated" }
+[kinds.catalyst.relations]
+targets = { to = "thesis|joint|concept|axiom", graph = false, inverse = "catalysed-by" }
+produced = { to = "thesis|witness|joint|concept|derivation", required_in = ["placed"], graph = false, inverse = "produced-by" }
+
+[views.agenda]
+kind = "joint"
+where = ["priority=high", "state!=resolved", "state!=dissolved"]
+wake = true
+
+[views.awaiting-review]
+kind = "thesis"
+state = "canonical-hypothesis"
+wake = true
+
+[views.unverified-witnesses]
+kind = "witness"
+state = "noted"
+wake = true
+
+[views.catalyst-in-flight]
+kind = "catalyst"
+where = ["state!=placed", "state!=dropped"]
+wake = true
+
+[views.thesis-counts]
+kind = "thesis"
+group_count = true
+into = "docs/ONTOLOGY.md#thesis-counts"
+
+[views.joint-counts]
+kind = "joint"
+group_count = true
+into = "docs/ONTOLOGY.md#joint-counts"
+
+[views.canon]
+kind = "thesis"
+state = "canonical"
+columns = ["id", "scope", "title"]
+into = "docs/ONTOLOGY.md#canon"
