@@ -89,13 +89,19 @@ log "self-check: ok"
 GENOME_BIN="$PRIMARY/scripts/genome"
 chmod +x "$GENOME_BIN"
 
-# Optional PATH wiring: put `genome` on PATH via ~/.local/bin, guarded so
-# re-running never duplicates the rc line (grep before append).
+# First-class install: `genome` must be on PATH before any agent goes
+# looking for it. The recurring failure this fixes is real: agents on fresh
+# boxes run `genome ...` from a project's AGENTS.md and fail with "genome:
+# command not found", then improvise a path guess. Two routes, tried in order:
+#   1. ~/.local/bin (user-writable, standard, on PATH for humans and agents;
+#      symlinked + rc-line guarded so re-running never duplicates).
+#   2. /usr/local/bin (system-wide) — attempted only when passwordless sudo
+#      is available; never a hard failure when it is not.
 BIN_DIR="$HOME/.local/bin"
 RC_FILE="$HOME/.bashrc"; [ -n "${ZSH_VERSION:-}" ] && RC_FILE="$HOME/.zshrc"
 if mkdir -p "$BIN_DIR" 2>/dev/null; then
   ln -sfn "$GENOME_BIN" "$BIN_DIR/genome"
-  log "genome symlinked: $BIN_DIR/genome"
+  log "genome on PATH: $BIN_DIR/genome"
   if [ -f "$RC_FILE" ] && ! grep -qsE '(^|:)\$?HOME/\.local/bin(["'"'"']?)' "$RC_FILE"; then
     printf '\n# added by project-genome installer: ~/.local/bin on PATH\nexport PATH="$HOME/.local/bin:$PATH"\n' >> "$RC_FILE"
     log "PATH line appended to $RC_FILE (takes effect in new shells)"
@@ -103,18 +109,25 @@ if mkdir -p "$BIN_DIR" 2>/dev/null; then
 else
   log "could not create $BIN_DIR — use the export line below instead"
 fi
+# System-wide attempt (best-effort, non-fatal): passwordless sudo only.
+if command -v genome >/dev/null 2>&1; then
+  : # already reachable — nothing to add
+elif sudo -n true >/dev/null 2>&1; then
+  sudo -n ln -sfn "$(readlink -f "$GENOME_BIN")" /usr/local/bin/genome 2>/dev/null \
+    && log "genome on PATH system-wide: /usr/local/bin/genome" \
+    || log "~/.local/bin stands; /usr/local/bin skipped (sudo refused)"
+fi
+# Verify the promise this installer makes: `genome` resolves.
+command -v genome >/dev/null 2>&1 \
+  || log "WARN: genome not on PATH in THIS shell — new shells get it via $RC_FILE"
 
 echo ""
 echo "project-genome installed."
 echo ""
-echo "Wire your harness to the CLI once (genome is not on PATH by default):"
+echo "The genome CLI is on PATH — inside any project:"
 echo ""
-echo "  export GENOME=\"$GENOME_BIN\""
-echo ""
-echo "Then, inside any project:"
-echo ""
-echo "  \$GENOME init --profile core    # or: records | research | ops | agents"
-echo "  \$GENOME wake                   # orient"
+echo "  genome init --profile core    # or: records | research | ops | agents"
+echo "  genome wake                   # orient"
 echo ""
 if command -v npx >/dev/null 2>&1; then
   echo "Agent harnesses using the skills registry can also install directly:"
