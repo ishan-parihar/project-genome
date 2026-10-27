@@ -18,7 +18,7 @@ $ genome wake
 ```
 
 - **One file, zero dependencies.** The CLI is `scripts/genome`, Python ≥ 3.11, stdlib only. No install step beyond having the file.
-- **Self-checking.** `scripts/test_genome.py` runs 35 independent cases against a scratch copy; it never writes your project.
+- **Self-checking.** `scripts/test_genome.py` runs 36 independent cases against a scratch copy; it never writes your project.
 - **Scales by module.** A small app needs `core`. A multi-year R&D program turns on records, research evidence, ops gates, and multi-agent boards — same CLI.
 - **Federates.** Per-project genomes exchange typed cards (`federate`), so a portfolio of repos answers questions as one (`ask --all`).
 
@@ -40,7 +40,7 @@ or manually:
 
 ```bash
 git clone https://github.com/ishan-parihar/project-genome.git ~/.agents/skills/project-genome
-python3 ~/.agents/skills/project-genome/scripts/test_genome.py   # 35/35 must pass
+python3 ~/.agents/skills/project-genome/scripts/test_genome.py   # 36/36 must pass
 ```
 
 Point your harness at the CLI once: `GENOME=~/.agents/skills/project-genome/scripts/genome`.
@@ -144,7 +144,8 @@ Per-workflow claim boards with flock-guarded rows (two agents cannot hold the sa
 ```
 src/NN_*.py        the source modules (edit here)
 scripts/build.py   concatenates src/ into scripts/genome byte for byte
-scripts/test_genome.py   the self-check: 35 independent cases, scratch-copy isolated
+scripts/test_genome.py   the self-check: 36 independent cases, scratch-copy isolated
+scripts/probe-outline-languages.py   the outline derivation across every language in the fleet
 evals/             graded evals + fixtures
 ```
 

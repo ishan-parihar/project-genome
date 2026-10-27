@@ -98,6 +98,10 @@ heading, and its columns are found by header name:
 - **Absent columns.** A check that needs an absent column is skipped (E206 without a re-open column).
 - **`hyp verdict`.** It appends the dated evidence to the evidence cell rather than replacing it, so the earlier
   deconstruction stays readable.
+- **Surfaces.** `research.surfaces` names where figures must carry a class. `research.quarantine_surfaces` widens
+  only the E202 sweep — where a struck figure may not reappear. It defaults to the research surfaces, so a skill
+  reference that quotes measurements is unguarded until you name it: `quarantine_surfaces = ["SKILL.md",
+  "docs/**"]`. E202 reads the wider list; W201 still reads the narrower one.
 
 Never keep two registers of verdicts, a protocol table and `HYPOTHESES.md`. An agent routed to the thinner one
 concludes that nothing was tried.

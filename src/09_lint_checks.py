@@ -269,6 +269,14 @@ def research_surfaces(cfg: Cfg) -> list[Path]:
     return cfg.globs(s) if s else [cfg.path(r) for r in ("state", "agents") if cfg.has(r)]
 
 
+def quarantine_surfaces(cfg: Cfg) -> list[Path]:
+    """Where a quarantined figure may not appear: the research surfaces plus every skill reference and audit that
+    quotes measurements (RG-040). The narrow `surfaces` key left the skill references unguarded, so a struck figure
+    could be re-quoted there with no check."""
+    s = cfg.get("research", "quarantine_surfaces")
+    return cfg.globs(s) if s else research_surfaces(cfg)
+
+
 def quarantined(cfg: Cfg) -> list[tuple[str, str]]:
     if not cfg.has("quarantine"):
         return []
@@ -282,11 +290,11 @@ def lint_research(cfg: Cfg) -> list[str]:
     fig, cls = figure_re(cfg), class_re(cfg)
     q = quarantined(cfg)
     qpath = cfg.path("quarantine").resolve()
-    for f in research_surfaces(cfg):
+    for f in quarantine_surfaces(cfg):
         text = read(f)
         text = blank_zones(text)
         for h, a, b, body in md_sections(text, "(top)"):
-            if fig.search(body) and not cls.search(body) and not cls.search(h):
+            if f in set(research_surfaces(cfg)) and fig.search(body) and not cls.search(body) and not cls.search(h):
                 n = a + next(i for i, ln in enumerate(body.splitlines()) if fig.search(ln))
                 out.append(f"W201 {cfg.rel(f)}:{n} figure without an evidence class in section '{h[:50]}'")
         if f.resolve() != qpath:

@@ -235,6 +235,16 @@ def redteam(base: Path) -> None:
     st.write_text("# S\n\n## State — x\n\nDSR 0.03 `[IN-SAMPLE]`\n")
     assert "E202" in run(root, "lint", ok=False).stdout
     st.write_text("# S\n\n## State — x\n")
+    # F8 quarantine_surfaces widens the E202 sweep only: a file that is not a research surface still
+    # catches a struck figure (RG-040), while W201 keeps reading the narrower list
+    (root / "REF.md").write_text("# r\n")
+    t = (root / "genome.toml").read_text()
+    (root / "genome.toml").write_text(t.replace("[research]\n", '[research]\nquarantine_surfaces = ["REF.md"]\n', 1))
+    assert "E202" not in run(root, "lint", ok=False).stdout  # the key is known, not a typo
+    (root / "REF.md").write_text("# r\n\nDSR 0.03\n")
+    assert "E202" in run(root, "lint", ok=False).stdout
+    assert "W201" not in run(root, "lint", ok=False).stdout  # not a research surface: no class demand
+
     # F5 deleting a pre-registration row is an append-only violation
     (root / "ev/s.json").write_text("{}")
     run(root, "prereg", "freeze", "ev/s.json")
