@@ -58,6 +58,14 @@ if [ "${#ROOTS[@]}" -eq 0 ]; then
 fi
 
 # ── [SECTION: install] clone-or-update into each detected root ────────────
+# Three install states, not two. The pre-installer era copied the skill by
+# rsync (no .git), and those copies can neither `git pull` nor be updated by
+# the update branch above — the installer used to fail on them and walk
+# away, stranding the machine on an old genome forever (observed: a
+# 2026.10.22 install that could not take the outline module). The third
+# branch migrates instead of failing: backup OUTSIDE the skills root (so a
+# broken harness scan does not pick the backup up as a second skill),
+# fresh clone, self-check, backup kept.
 INSTALLED=()
 for root in "${ROOTS[@]}"; do
   dest="$root/$TARGET_NAME"
@@ -66,7 +74,16 @@ for root in "${ROOTS[@]}"; do
     git -C "$dest" fetch origin "$BRANCH" --quiet || fail "could not fetch $REPO (network?) — check connectivity and re-run"
     git -C "$dest" reset --hard "origin/$BRANCH" --quiet || fail "could not update $dest — is another process holding it?"
   elif [ -d "$dest" ]; then
-    fail "$dest exists but is not a git checkout — move it aside and re-run (its content will be replaced by the repo copy)"
+    backup="$HOME/.agents/skills-backup/${TARGET_NAME}-pre-git-$(date +%Y%m%d-%H%M%S)"
+    log "existing install is not a git checkout (pre-installer copy) — migrating"
+    mkdir -p "$(dirname "$backup")" \
+      && mv "$dest" "$backup" \
+      || fail "could not move $dest aside to $backup — check permissions and re-run"
+    log "old copy preserved at: $backup"
+    git clone --depth 1 --branch "$BRANCH" "$REPO" "$dest" --quiet 2>/dev/null \
+      || { mv "$backup" "$dest" 2>/dev/null || true
+           fail "clone failed after migration — old copy restored at $dest"; }
+    log "migrated: $dest (backup kept at $backup)"
   else
     mkdir -p "$root"
     git clone --depth 1 --branch "$BRANCH" "$REPO" "$dest" --quiet 2>/dev/null \
