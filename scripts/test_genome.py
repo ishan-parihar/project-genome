@@ -50,6 +50,7 @@ def full_repo(root: Path) -> None:
     (root / ".env").write_text("API_KEY=sup3rsecretvalue\n")
     (root / ".gitignore").write_text((root / ".gitignore").read_text() + ".env\n")
     git(root, "add", "-A"); git(root, "commit", "-qm", "init")
+    run(root, "outline")  # the `full` profile turns the outline module on; emit its first zone
     assert "lint: clean" in run(root, "lint").stdout, run(root, "lint", ok=False).stdout
 
 
@@ -165,6 +166,38 @@ def legacy_kb_toml(root: Path) -> None:
     m = run(leg, "modules").stdout
     assert "kb.toml" in m and "[x] agents" in m, m
     assert "E001" not in run(leg, "lint", "--advisory").stdout
+
+
+@case
+def outline(root: Path) -> None:
+    """the stack zone: derived per repo, never from a name; and --check must not write."""
+    # three dialects, three answers. The third is the case the rule exists for: a repo
+    # named `…-lyr` that is Rust. A dirname-derived language row would call it Python.
+    for i, (manifest, lang) in enumerate([
+        ('Cargo.toml = """[package]\nname = \"thing\"\n\"""\n', "rust"),
+        ('pyproject.toml = """[project]\nname = \"thing\"\ndependencies = [\"click\", \"rich\"]\n\"""\n', "python"),
+        ('package.json = """{\"name\":\"thing\",\"main\":\"dist/index.js\"}"""\n', "javascript"),
+    ]):
+        r = root / f"repo{i}"
+        r.mkdir()
+        git(r, "init", "-q"); git(r, "config", "user.email", "t@t"); git(r, "config", "user.name", "t")
+        (r / "genome.toml").write_text('[genome]\nmodules = ["core", "outline"]\n')
+        # the manifest is a file of its own; genome.toml only says which modules are on
+        mf, mbody = manifest.split(" = ", 1)
+        (r / mf).write_text(mbody)
+        (r / "AGENTS.md").write_text("# a\n\n<!-- genome:zone stack -->\n")
+        (r / "src").mkdir(); (r / "src/lib.rs").write_text("mod inner;\n")
+        (r / "src/inner.rs").write_text("pub fn f() {}\n")
+        git(r, "add", "-A"); git(r, "commit", "-qm", "x")
+        c = run(r, "outline-check", ok=False)
+        assert c.returncode == 2 and "STALE" in c.stdout, c.stdout
+        # a check that writes is not a check: the repair must be a separate command
+        assert "STALE MARKER" not in (r / "AGENTS.md").read_text()
+        run(r, "outline")
+        body = (r / "AGENTS.md").read_text()
+        assert f"| language | `{lang}` |" in body, body
+        assert "src/inner.rs" not in body  # wiring edges only name local modules
+        run(r, "outline-check")
 
 
 @case

@@ -1,7 +1,7 @@
 # ---------------------------------------------------------------- constants
 
 JSON_CMDS = {"ask", "lint", "doctor", "new", "show", "find", "graph", "place", "card", "impact"}  # commands with a --json form
-MODULES = ("core", "records", "research", "ops", "agents")
+MODULES = ("core", "records", "research", "ops", "agents", "outline")
 PROFILES = {
     "software": ["core", "records"],
     "research": ["core", "records", "research", "ops"],
@@ -55,6 +55,7 @@ MODULE_ROLES = {
     "research": ["evidence", "hypotheses", "quarantine", "prereg"],
     "ops": ["ownership_map"],
     "agents": ["feed", "workflows"],
+    "outline": ["agents"],
 }
 APPEND_ONLY = ("ledger", "worklog", "feed", "prereg", "quarantine")
 TOMBSTONE = re.compile(r"<!--\s*kb: tombstone target=\"([^\"]+)\"")
@@ -63,7 +64,7 @@ ERR = 2
 MIN_CHUNK = 5  # lines; `ask` hits narrower than this point at a lead line without its content
 HUB_NODE_CAP = 3000  # nodes; above this `graph hubs` ranks by degree and says betweenness was not computed
 _TMP_SEQ = itertools.count()  # makes each atomic_write temp name unique within this process too
-VERSION = "2026.10.22-17"
+VERSION = "2026.10.27-11"
 # every key genome reads: an unknown key is a typo that would silently switch a check off (E017)
 CONFIG_KEYS = {
     "genome": {"modules", "schema_version"},
@@ -79,6 +80,7 @@ CONFIG_KEYS = {
     "ops": {"bulk_allow", "bulk_globs", "code_globs", "code_roots", "jobs", "link_prefixes", "link_surfaces",
             "max_bytes", "owner_exempt", "owner_globs", "py_paths", "secrets", "root_files", "dir_suffixes",
             "dir_requires", "stale_terms", "stale_exempt", "external_ok"},
+    "outline": {"zones"},
 }
 STALE_DOCS = ("*.md", "*.yaml", "*.yml", "*.toml", "*.txt", "*.rst")  # stale paths matter where people read
 # The root files an ordinary software repo carries, and that no role points at.

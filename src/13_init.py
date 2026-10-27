@@ -89,6 +89,10 @@ def cmd_init(args) -> None:
         "research": [("docs/kb/HYPOTHESES.md", HYP_TPL), ("docs/kb/QUARANTINE.md", QUAR_TPL),
                      ("docs/kb/PREREG.md", PREREG_TPL), ("evidence/README.md", EVIDENCE_TPL)],
         "ops": [("docs/INDEX.md", MAP_TPL)],
+        # The outline module's hand-written half. The zone above holds derived facts and
+        # points here; a KB that ships the zone without this file asserts a document that
+        # does not exist, which `genome lint` E001 fails. Neither half is optional.
+        "outline": [("docs/OUTLINE.md", OUTLINE_TPL)],
         "agents": [("docs/kb/feed.md", FEED_TPL)],
     }
     dirs = {"core": ["docs/plans", "docs/audit"], "records": ["docs/decisions", "docs/regressions"],
@@ -129,6 +133,7 @@ MODULE_HELP = {
     "research": "figure, quarantine, hyp add|verdict|list, prereg freeze|check (evidence discipline)",
     "ops": "secrets + lint gates: ownership map, links, unreachable code, tracked bulk, running-job guard",
     "agents": "wf new|add|list, claim, done, claim-register, post, feed (parallel agents)",
+    "outline": "outline | outline-check (the stack zone in AGENTS.md, derived from the tree)",
 }
 
 

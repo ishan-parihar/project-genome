@@ -1,7 +1,10 @@
 # ---------------------------------------------------------------- templates
 
 def genome_toml(mods: list[str], gate: str) -> str:
-    roles = [r for m in mods for r in MODULE_ROLES[m]]
+    # A role may belong to more than one module — `outline` writes into the same
+    # `agents` file `core` owns — and writing its path twice is a duplicate TOML key,
+    # which tomllib refuses. First module wins; the order is MODULES'.
+    roles = list(dict.fromkeys(r for m in mods for r in MODULE_ROLES[m]))
     out = ["# genome.toml — modules on, role → path map, module settings. Edit freely.",
            "[genome]", f"schema_version = {SCHEMA_VERSION}", f"modules = {json.dumps(mods)}", "", "[paths]"]
     out += [f'{r} = "{DEFAULT_PATHS[r]}"' for r in roles]
@@ -32,6 +35,35 @@ def genome_toml(mods: list[str], gate: str) -> str:
     return "\n".join(out) + "\n"
 
 
+# The hand-written half of the outline. The `stack` zone in AGENTS.md holds the
+# derived facts; this file holds what a generator cannot: the one rule that shaped the
+# system, and the order to read it in. Amend it when a decision changes the shape.
+OUTLINE_TPL = """# Outline — <name>
+
+One paragraph: what this is, who it is for, and the one thing it must never do.
+
+## The shape
+
+A mermaid diagram and a component table.
+
+## The one rule
+
+The single constraint that shapes everything else.
+
+## How the parts wire
+
+The import graph in prose, with the rule each edge encodes.
+
+## How to check it
+
+The gate command, and what green means.
+
+## Reading order
+
+The documents to read next, in order.
+"""
+
+
 def agents_tpl(mods: list[str], gate: str) -> str:
     rows_ = [("what is this / how to build / the rules (for agents)", "this file"),
              ("what is this, how do I install and run it (for readers)", "`README.md`"),
@@ -59,6 +91,9 @@ def agents_tpl(mods: list[str], gate: str) -> str:
     if "agents" in mods:
         rows_ += [("cross-agent messages, claims, mentions", "`docs/kb/feed.md`"),
                   ("in-flight work per workflow", "`docs/kb/workflows/`")]
+    if "outline" in mods:
+        rows_ += [("the stack: language, size, wiring, gate (generated)", "the `stack` zone below — `genome outline`"),
+                  ("how those parts fit together, and the reading order", "`docs/OUTLINE.md`")]
     table = "\n".join(f"| {q} | {a} |" for q, a in rows_)
     return f"""# AGENTS.md — the entry contract
 

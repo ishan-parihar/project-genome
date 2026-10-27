@@ -526,8 +526,15 @@ def lint_agents(cfg: Cfg) -> list[str]:
     return out
 
 
+def lint_outline(cfg: Cfg) -> list[str]:
+    """The same E-rule the records zones use, so a stale outline fails `genome lint` and
+    `genome close` by the code a reader already knows, not a new one."""
+    return [f"E104 {s.rsplit(' (', 1)[0]}: zone `{OUTLINE_ZONE}` is stale — `genome outline`"
+            for s in outline_stale(cfg)]
+
+
 CHECKS = {"core": lint_core, "records": lint_records, "research": lint_research, "ops": lint_ops,
-          "agents": lint_agents}
+          "agents": lint_agents, "outline": lint_outline}
 
 
 def run_lint(cfg: Cfg, only: str | None = None) -> list[str]:

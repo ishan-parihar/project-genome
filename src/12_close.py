@@ -65,6 +65,7 @@ def emit_all(cfg: Cfg) -> list[str]:
     changed = emit_records(cfg) if "records" in cfg.modules else []
     if worklog_numbered(cfg) and emit_worklog_index(cfg):
         changed.append(cfg.rel(worklog_index(cfg)))
+    changed += emit_outline(cfg) if "outline" in cfg.modules else []
     return changed + (emit_views(cfg) if cfg.views else []) + emit_status(cfg)
 
 
