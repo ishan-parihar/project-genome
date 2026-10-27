@@ -31,6 +31,7 @@ The CLI is `scripts/genome`: one file, stdlib only, Python ≥ 3.11. It finds th
 | **research** | numbers are produced by experiments and quoted in docs | evidence classes on every figure, quarantine register, hypotheses with verdicts and re-open conditions, frozen pre-registrations, `figure` (propagation check) |
 | **ops** | the repo is big enough to rot quietly | ownership map completeness, dead links across docs, unreachable code, tracked bulk, secret scan of diffs, running-job edit guard, jobs in `wake` |
 | **agents** | more than one agent works at once | per-workflow boards with flock-guarded claims, the agent feed and mention inbox |
+| **outline** | an arriving agent needs the stack, not the story | a `stack` zone in `AGENTS.md` derived from the tree (language, size, gate, deps, wiring) + `docs/OUTLINE.md` for the prose; `outline` emits, `outline-check` gates |
 
 Not modules, available in every repo: **blueprints** (ready-made and custom knowledge bases: `references/blueprints.md`), **kinds** (declare your own entity types with lifecycles and typed relations: `references/kinds.md`), the **index and graph** (`ask --index`, `graph`, `place`), and **federation and drift** (`card`, `federate`, `ask --all`, `covers`/`verified`, `upgrade`: `references/federation.md`).
 
@@ -41,7 +42,7 @@ Not modules, available in every repo: **blueprints** (ready-made and custom know
 | `software` | core, records |
 | `research` | core, records, research, ops |
 | `team` | core, records, agents |
-| `full` | all five |
+| `full` | all six |
 
 A module is added later by editing `[genome] modules` in `genome.toml`. Its checks and commands then switch on;
 `genome modules` shows what is on. Start with the smallest set that covers the project's real failure modes,

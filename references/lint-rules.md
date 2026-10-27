@@ -41,6 +41,7 @@ Errors are doctrine violations. Warnings are hygiene, or judgement the linter ca
 | E102 | record ID used twice | renumber the newer one; IDs are never reused |
 | E103 | Superseded/Retired record still in an active dir | `genome rec supersede/retire` moves it |
 | E104 | emitted records/idmap zone stale or absent | `genome rec emit` |
+| E104 | emitted `stack` zone stale or absent (outline module) | `genome outline` |
 | W105 | record cites an unknown ID | the ID is wrong, or its record was never imported (see adoption: detaching) |
 | E105 | record frontmatter: ID ≠ file name, required field missing (`records.required`, active records), bad Date / Severity | fix the frontmatter |
 | E106 | `Supersedes` names an unknown or still-active record | import the retired record, or `genome rec supersede X --by Y` |

@@ -1,6 +1,11 @@
 # KB OUTLINE — the standard kickstart outline for a knowledge base
 
-**Status:** upgrade proposal for `project-genome`. Nothing here is implemented yet.
+**Status:** **implemented.** `src/04a_outline.py` ships the `outline` module: `genome
+outline` emits the zone, `genome outline-check` gates it, and `genome close` refreshes
+it. This document is the proposal it was built from; its three open questions are now
+settled by the implementation — `outline` is the sixth module (not six more files in
+`core`), the zone lives in `AGENTS.md`, and the check gates from the start. Committed in
+`854f847`; `meme-lyr` is the first KB running it (`105d430`).
 **Author:** the docs-library session, 2026-10-27.
 **Applies to:** every venture under the meta-directory that carries a `genome.toml`.
 
