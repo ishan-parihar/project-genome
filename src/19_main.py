@@ -150,6 +150,8 @@ def main() -> None:
     s.add_argument("kind", nargs="?", help="register: skill | bin | vendored")
     s.add_argument("path", nargs="?", help="register: the install path (absolute or ~)")
     s.add_argument("--note")
+    s.add_argument("--against-shipped", action="store_true", dest="against_shipped",
+                   help="verify: compare every install against the freshest skill/bin copy, not against its own registration")
 
     s = add("wf", cmd_wf, "workflow boards: new | add | list")
     s.add_argument("wf_cmd", choices=["new", "add", "list"]); s.add_argument("name", nargs="?")

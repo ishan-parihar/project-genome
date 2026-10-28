@@ -1447,10 +1447,23 @@ def installs_registry(root: Path) -> None:
     out = run(root, "installs", "scan", env=iso)
     assert "no unregistered installs found" in out.stdout, ("link-into-tracked-root re-reported", out.stdout)
     # restore the bin registration (drift checks below expect both rows present)
+    # THE UPSTREAM CHECK: verify --against-shipped compares every row against the
+    # freshest skill/bin copy (the install.sh-managed reference), not against its own
+    # registration — the registry-vs-disk verify cannot see that a copy is behind.
+    run(root, "installs", "register", "skill", str(sk), env=env)
+    stale_copy = root / "oldrepo"; (stale_copy / "scripts").mkdir(parents=True)
+    shutil.copyfile(G, stale_copy / "scripts" / "genome")
+    gp2 = stale_copy / "scripts" / "genome"
+    gp2.write_text(gp2.read_text().replace('VERSION = "2026.', 'VERSION = "2025.'))
+    run(root, "installs", "register", "vendored", str(stale_copy), env=env)
+    r = run(root, "installs", "verify", "--against-shipped", ok=False, env=env)
+    assert r.returncode == 2 and "BEHIND" in r.stdout and str(stale_copy) in r.stdout, (r.returncode, r.stdout)
+    # the default verify is UNCHANGED: the older vendored copy matches its own record
+    assert "all" in run(root, "installs", "verify", env=env).stdout
     run(root, "installs", "register", "bin", str(bin_dir / "genome"), env=env)
     # verify: all present, versions unchanged -> exit 0
     v = run(root, "installs", "verify", env=env)
-    assert "all 2 registered" in v.stdout, v.stdout
+    assert "all 3 registered" in v.stdout, v.stdout
     # drift: bump the script's version under the registry -> STALE, exit 2
     gp = sk / "scripts" / "genome"
     gp.write_text(gp.read_text().replace('VERSION = "2026.', 'VERSION = "9999.'))

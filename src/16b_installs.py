@@ -49,6 +49,47 @@ def save_installs(data: dict) -> None:
     tmp.replace(p)
 
 
+def _version_key(v: str) -> tuple:
+    """A VERSION stamp as a sortable key: YYYY.MM.DD-N tuples compare chronologically, so
+    'the freshest registered copy' is a max(), not a string compare."""
+    m = re.match(r"(\d{4})\.(\d{2})\.(\d{2})-(\d+)$", v or "")
+    return tuple(int(g) for g in m.groups()) if m else (0, 0, 0, 0)
+
+
+def _verify_against_shipped(rows: list) -> None:
+    """The check the registry clause actually needs: every registered install against the
+    SHIPPED reference, not against its own registration record. The reference is the
+    freshest live version among the skill/bin rows — those are the copies install.sh
+    manages, so by construction they are (or were just made) current. A row whose live
+    version is older is BEHIND and listed with the delta; a row whose version is not
+    comparable (a fork with a local stamp) is reported UNKNOWN rather than silently
+    green. Exit 2 when anything is behind: 'all upgrades are seamless' has to start
+    with knowing which copies are behind."""
+    live = {r["path"]: _version_of(Path(r["path"])) for r in rows}
+    refs = [live[r["path"]] for r in rows if r.get("kind") in ("skill", "bin") and _version_key(live[r["path"]]) > (0,) * 4]
+    if not refs:
+        die("no skill/bins copy registered to use as the shipped reference — run install.sh "
+            "or `genome installs register skill <root>` first", ERR)
+    ref = max(refs, key=_version_key)
+    behind, unknown = [], []
+    for r in rows:
+        v = live[r["path"]]
+        if v == "missing":
+            continue
+        if _version_key(v) < _version_key(ref):
+            behind.append((r, v))
+        elif _version_key(v) == (0,) * 4:
+            unknown.append((r, v))
+    for r, v in behind:
+        print(f"BEHIND  {r['kind']:8} {r['path']} — {v}, shipped is {ref}")
+    for r, v in unknown:
+        print(f"UNKNOWN {r['kind']:8} {r['path']} — version {v!r} does not compare (a local stamp?)")
+    if not behind and not unknown:
+        print(f"verify: all {len(rows)} registered install(s) at the shipped version {ref}")
+        return
+    die(f"{len(behind)} behind, {len(unknown)} unknown (shipped {ref})", ERR)
+
+
 def _script_of(path: Path) -> Path:
     """A registered path's genome script: the path itself when it is one (bin symlink or vendored
     scripts/genome), or the skills root's scripts/genome when the path is the root directory."""
@@ -125,6 +166,9 @@ def cmd_installs(args) -> None:
         if not rows:
             die("no installs registered — this machine has proven nothing: run install.sh "
                 "(it registers everything it creates), or `genome installs scan`", ERR)
+        if getattr(args, "against_shipped", False):
+            _verify_against_shipped(rows)
+            return
         stale, broken = [], []
         for r in rows:
             p = Path(r["path"])
