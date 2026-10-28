@@ -117,8 +117,16 @@ def cmd_installs(args) -> None:
         return
     if args.installs_cmd == "verify":
         data = load_installs()
+        rows = data["installs"]
+        # An EMPTY registry is not a pass: on a fresh machine nothing has proven
+        # itself yet, and a green line here is exactly the silent failure this
+        # registry exists to catch. Say nothing-tested and exit 2, so a new
+        # agent or a post-install gate cannot read "0 installs" as healthy.
+        if not rows:
+            die("no installs registered — this machine has proven nothing: run install.sh "
+                "(it registers everything it creates), or `genome installs scan`", ERR)
         stale, broken = [], []
-        for r in data["installs"]:
+        for r in rows:
             p = Path(r["path"])
             v = _version_of(p)
             if v == "missing":
@@ -130,7 +138,7 @@ def cmd_installs(args) -> None:
         for r, v in stale:
             print(f"STALE   {r['kind']} {r['path']} — manifest says {r['version']}, on disk {v}")
         if not broken and not stale:
-            print(f"verify: all {len(data['installs'])} registered install(s) present, versions unchanged")
+            print(f"verify: all {len(rows)} registered install(s) present, versions unchanged")
             return
         die(f"{len(broken)} missing, {len(stale)} changed since registration", ERR)
     if args.installs_cmd == "scan":

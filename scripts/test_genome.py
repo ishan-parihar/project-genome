@@ -1416,6 +1416,11 @@ def installs_registry(root: Path) -> None:
     iso = {**env, "HOME": str(root), "PATH": str(bin_dir) + ":/usr/bin:/bin"}
     # empty registry: list says so; scan finds both (HOME isolated from the host machine)
     assert "no installs registered" in run(root, "installs", "list", env=env).stdout
+    # THE EMPTY-REGISTRY GATE: verify on a fresh manifest is NOT a pass — "all 0
+    # registered ... unchanged" is the exact silent success the registry exists
+    # to catch, so it must exit 2 and name the nothing-tested cause.
+    v0 = run(root, "installs", "verify", ok=False, env=env)
+    assert v0.returncode == 2 and "no installs registered" in v0.stderr, (v0.returncode, v0.stderr)
     out = run(root, "installs", "scan", ok=False, env=iso)
     found_paths = [ln.split()[2] for ln in out.stdout.splitlines() if ln.startswith("unregistered")]
     assert str(sk) in found_paths, (found_paths, out.stdout)
