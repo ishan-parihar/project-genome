@@ -112,7 +112,9 @@ done
 
 # ── [SECTION: verify] the self-check, in the installed copy ───────────────
 PRIMARY="${INSTALLED[0]}"
-log "running the self-check (35 cases, scratch-copy isolated)…"
+CASE_COUNT="$(grep -c '^@case' "$PRIMARY/scripts/test_genome.py" 2>/dev/null || echo 0)"
+# the case count comes from the file, not from a hand-kept number (it was 35 while the suite said 36)
+log "running the self-check ($CASE_COUNT cases, scratch-copy isolated)…"
 if ! "python3" "$PRIMARY/scripts/test_genome.py" >/dev/null 2>&1; then
   "python3" "$PRIMARY/scripts/test_genome.py" | tail -5 || true
   fail "the self-check failed in $PRIMARY — the install is not verified; do not use it"

@@ -509,7 +509,6 @@ def redteam3(base: Path) -> None:
 
 
 @case
-@case
 def layout_invariant(base: Path) -> None:
     """A file may only live where a role points at — and close must not commit one that does not."""
     root = base / "layout"
