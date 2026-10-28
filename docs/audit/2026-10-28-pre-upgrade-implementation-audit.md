@@ -37,7 +37,7 @@ The operator's ask has four separable parts. Measured gap for each:
 | WORKLOG/BUGS/TODO/WORKFLOW manageable via CLI + sqlite with a standardized schema | All four are markdown-file surfaces with CLI management (`genome log`, `status`, `claim`, `done`, `wf new/add/list`, `q`). The `sqlite` store exists ONLY as the `ask --index` BM25 cache (`.genome/index.db`, `18b_index.py`), not as a write-model. | **Gap — the protocol defines `.genome/kb.sqlite` as the write-model; this audit confirms it does not exist.** No sqlite write path, no migration tool, no rendered views. |
 | plan/audit mint fails when a new dated file exists without approved disposition of open transients | `genome plan`/`genome audit` mint unconditionally; a hand-written dated plan/audit is INVISIBLE to lint (probe: lint clean on `docs/plans/2026-10-28-*.md` and `docs/audit/*.md` written outside the CLI); the TRANSIENTS register does not exist. | **Gap — this is the protocol's M017/E018 pair; both absent by design (they are the upgrade).** |
 | One active WORKFLOW/TODO row per agent | `genome claim` guards PER-ITEM ("claimed by X") but a single agent can hold items in MULTIPLE boards simultaneously — proven by probe: `claim probe-wf-001` and `claim probe-wf2-001` both succeed for the same agent id. | **Gap — E019 absent.** The protocol's `one-active-per-agent` partial-unique index is new machinery. |
-| genome CLI first-class + registry so upgrades reach every install | install.sh already installs to PATH (hardened at `0151979` + `82c7211`), but **nothing records WHERE the installs are**: this machine carried two skills roots two commits behind origin and the PATH copy two VERSION stamps behind, silently. | **FIXED by this iteration** — §4. |
+| genome CLI first-class + registry so upgrades reach every install | install.sh already installs to PATH (hardened at `0151979` + `82c7211`), but **nothing records WHERE the installs are**: this machine carried FOUR skills roots (`.agents`, `.claude`, `.zcode`, `.codex` — the last two discovered by the installer run itself) and the PATH bin, all at staggered versions, silently. | **FIXED by this iteration** — §4. |
 
 ## 3. Utilization audit — what is effectively used in the active loop
 
@@ -64,12 +64,13 @@ set, secrets, resolve, outline, outline-check, modules, index, figure
   workflow (W201/E202 fire) but the CLI verbs themselves are uninvoked.
 
 **Redundancies confirmed (ponytail class):** the vendored `scripts/genome`
-fork-per-repo convention itself is the largest one — every repo carries a 14k
+fork-per-repo convention itself is the largest one — every repo carries a 6.3k
 line copy; drifts measured coparatively: operant's copy now equals shipped
-`2026.10.27-13` (0 diff lines after the peer closed it), but the machine's
-skills roots sat at `7635877` and PATH at `2026.10.27-11` — three independent
-delivery surfaces, zero shared knowledge of each other. The install registry is
-the first fix; the protocol's rendered-read-view + migration is the second.
+`2026.10.27-13` (0 diff lines after the peer closed it), while this machine's
+four skills roots sat at staggered commits and the PATH copy two VERSION
+stamps behind the skill — five independent delivery surfaces, zero shared
+knowledge of each other. The install registry is the first fix; the protocol's
+rendered-read-view + migration is the second.
 
 **Not re-verified:** the wider (non-operant) fleet's per-repo drift. Only this
 machine was measured; the registry's `installs scan` is designed to make the
@@ -100,6 +101,14 @@ learn why.
 - **Upgrade procedure now**: re-run install.sh (updates + re-registers), then
   `genome installs verify`; anything `scan` finds that install.sh does not touch
   (vendored copies in adopting repos) is upgraded with `genome upgrade --apply`.
+- **LIVE VERIFICATION on this machine** (2026-10-28): install.sh updated and
+  registered FOUR skills roots (`.agents`, `.claude`, `.zcode`, `.codex` — the
+  last two unknown before the run) plus the PATH bin; `genome installs verify`
+  reports "all 5 registered install(s) present, versions unchanged"; all five
+  run `2026.10.28-16`. The installer's self-check count is now derived from the
+  suite file (it announced a stale hardcoded 35) and a duplicated `@case`
+  decorator on `layout_invariant` — which inflated any decorator-based count
+  by one — was removed, so counts and suite agree at 37.
 
 ## 5. Bugs found by live probe (each with repro)
 
