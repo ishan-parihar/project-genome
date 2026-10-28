@@ -1402,6 +1402,66 @@ def p4_evidence_graph(root: Path) -> None:
     assert not gap(), "with both claims quarantined nothing connects magnesium to CRP or NMDA, so there is no gap to report"
 
 
+
+@case
+def installs_registry(root: Path) -> None:
+    """installs: register/list/verify/scan round-trip, drift and missing detection, dedupe by path"""
+    import json, os
+    man = root / "installs.json"
+    env = {"GENOME_INSTALLS": str(man)}
+    # a fake skills root at the CONVENTIONAL location scan probes, plus a bin symlink on the iso PATH
+    sk = root / ".agents/skills/project-genome"; (sk / "scripts").mkdir(parents=True)
+    shutil.copyfile(G, sk / "scripts" / "genome")
+    bin_dir = root / "bin"; bin_dir.mkdir()
+    os.symlink(sk / "scripts" / "genome", bin_dir / "genome")
+    iso = {**env, "HOME": str(root), "PATH": str(bin_dir) + ":/usr/bin:/bin"}
+    # empty registry: list says so; scan finds both (HOME isolated from the host machine)
+    assert "no installs registered" in run(root, "installs", "list", env=env).stdout
+    out = run(root, "installs", "scan", ok=False, env=iso)
+    found_paths = [ln.split()[2] for ln in out.stdout.splitlines() if ln.startswith("unregistered")]
+    assert str(sk) in found_paths, (found_paths, out.stdout)
+    assert str(bin_dir / "genome") in found_paths, (found_paths, out.stdout, iso.get("PATH"))
+    # scan exits 2 and names what it found (the skill root and the bin, by path)
+    assert out.returncode == 2 and "unregistered" in out.stdout, out.stdout
+    # register both (absolute paths are recorded as given, symlinks NOT resolved)
+    run(root, "installs", "register", "skill", str(sk), "--note", "test", env=env)
+    run(root, "installs", "register", "bin", str(bin_dir / "genome"), env=env)
+    data = json.loads(man.read_text())
+    paths = {r["path"] for r in data["installs"]}
+    assert paths == {str(sk), str(bin_dir / "genome")}, paths
+    assert all(r["version"].startswith("2026.") for r in data["installs"]), data
+    # re-registering the same path replaces, not duplicates
+    run(root, "installs", "register", "skill", str(sk), env=env)
+    assert len(json.loads(man.read_text())["installs"]) == 2
+    # and now the scan is quiet: everything conventional is registered
+    assert "no unregistered installs found" in run(root, "installs", "scan", env=iso).stdout
+    # THE RESOLUTION CASE: un-register the bin but keep the skills root registered —
+    # the link still resolves INTO a tracked root, so scan must NOT re-report it.
+    data = json.loads(man.read_text())
+    kept = [r for r in data["installs"] if r["kind"] != "bin"]
+    man.write_text(json.dumps(data | {"installs": kept}))
+    out = run(root, "installs", "scan", env=iso)
+    assert "no unregistered installs found" in out.stdout, ("link-into-tracked-root re-reported", out.stdout)
+    # restore the bin registration (drift checks below expect both rows present)
+    run(root, "installs", "register", "bin", str(bin_dir / "genome"), env=env)
+    # verify: all present, versions unchanged -> exit 0
+    v = run(root, "installs", "verify", env=env)
+    assert "all 2 registered" in v.stdout, v.stdout
+    # drift: bump the script's version under the registry -> STALE, exit 2
+    gp = sk / "scripts" / "genome"
+    gp.write_text(gp.read_text().replace('VERSION = "2026.', 'VERSION = "9999.'))
+    v = run(root, "installs", "verify", ok=False, env=env)
+    assert v.returncode == 2 and "STALE" in v.stdout, (v.returncode, v.stdout)
+    # missing: delete the script -> MISSING (not a crash), exit 2
+    gp.unlink()
+    v = run(root, "installs", "verify", ok=False, env=env)
+    assert v.returncode == 2 and "MISSING" in v.stdout, (v.returncode, v.stdout)
+    # bad kind is refused
+    assert run(root, "installs", "register", "wrong", str(sk), ok=False, env=env).returncode == 2
+
+
+
+
 @case
 def p1_dialect(base: Path) -> None:
     """One glob dialect: schema 2 is root-relative everywhere; schema 1 keeps basename-anywhere for membership

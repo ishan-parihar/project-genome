@@ -18,7 +18,7 @@ $ genome wake
 ```
 
 - **One file, zero dependencies.** The CLI is `scripts/genome`, Python ≥ 3.11, stdlib only. No install step beyond having the file.
-- **Self-checking.** `scripts/test_genome.py` runs 36 independent cases against a scratch copy; it never writes your project.
+- **Self-checking.** `scripts/test_genome.py` runs 37 independent cases against a scratch copy; it never writes your project.
 - **Scales by module.** A small app needs `core`. A multi-year R&D program turns on records, research evidence, ops gates, and multi-agent boards — same CLI.
 - **Federates.** Per-project genomes exchange typed cards (`federate`), so a portfolio of repos answers questions as one (`ask --all`).
 
@@ -40,14 +40,28 @@ or manually:
 
 ```bash
 git clone https://github.com/ishan-parihar/project-genome.git ~/.agents/skills/project-genome
-python3 ~/.agents/skills/project-genome/scripts/test_genome.py   # 36/36 must pass
+python3 ~/.agents/skills/project-genome/scripts/test_genome.py   # 37/37 must pass
 ```
 
 Point your harness at the CLI once: `GENOME=~/.agents/skills/project-genome/scripts/genome`.
 
+**The install registry.** The installer records every install it creates in
+`~/.config/genome/installs.json` (skills roots + PATH bins; override with
+`GENOME_INSTALLS`). After upgrading anywhere — re-run install.sh — one command
+proves the machine is consistent:
+
+```bash
+genome installs verify     # MISSING a path, or STALE vs the recorded VERSION -> exit 2
+genome installs scan        # any install the installer never registered
+genome installs list        # what this machine tracks, with live versions
+```
+
+Vendored copies inside adopting repos are informational (`installs register
+vendored <path>`); they upgrade with `genome upgrade --apply` in that repo.
+
 ### What it touches
 
-- Writes only inside your project: `genome.toml` (or legacy `kb.toml`, read unchanged) plus the directories your module set declares. Nothing outside the project root.
+- Writes only inside your project (`genome.toml`, or legacy `kb.toml`, read unchanged, plus the directories your module set declares), with two exceptions that write to the HOME, never to repos: the install registry (`~/.config/genome/installs.json`, via install.sh or `genome installs register`) and the federation card cache (`~/.cache/genome/cards`).
 - No telemetry, no network at run time. `genome upgrade` is the only command that may fetch, and only to compare the vendored copy's hash against `scripts/releases.txt`.
 - Reversibility: delete `genome.toml` and the genome-owned directories. Your documents are plain markdown + YAML throughout.
 
@@ -144,7 +158,7 @@ Per-workflow claim boards with flock-guarded rows (two agents cannot hold the sa
 ```
 src/NN_*.py        the source modules (edit here)
 scripts/build.py   concatenates src/ into scripts/genome byte for byte
-scripts/test_genome.py   the self-check: 36 independent cases, scratch-copy isolated
+scripts/test_genome.py   the self-check: 37 independent cases, scratch-copy isolated
 scripts/probe-outline-languages.py   the outline derivation across every language in the fleet
 evals/             graded evals + fixtures
 ```

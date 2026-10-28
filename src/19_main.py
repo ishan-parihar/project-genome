@@ -145,6 +145,12 @@ def main() -> None:
     s.add_argument("--at", help="freeze the spec as committed at this ref (backfilling a pre-registration)")
     add("secrets", cmd_secrets, "scan staged+unstaged diffs for configured secret values")
 
+    s = add("installs", cmd_installs, "the machine's genome installs: list | verify | register | scan")
+    s.add_argument("installs_cmd", choices=["list", "verify", "register", "scan"])
+    s.add_argument("kind", nargs="?", help="register: skill | bin | vendored")
+    s.add_argument("path", nargs="?", help="register: the install path (absolute or ~)")
+    s.add_argument("--note")
+
     s = add("wf", cmd_wf, "workflow boards: new | add | list")
     s.add_argument("wf_cmd", choices=["new", "add", "list"]); s.add_argument("name", nargs="?")
     s.add_argument("item", nargs="?")
