@@ -180,7 +180,7 @@ evals/             graded evals + fixtures
 
 Edit `src/`, rebuild with `python3 scripts/build.py`, verify with `python3 scripts/test_genome.py`. The version ledger in `scripts/releases.txt` tells `genome upgrade` a hand-patched vendored copy from a release.
 
-Build the package with `uv build`; the wheel ships the same built file the repos vendor, so a pip-installed genome and a vendored genome are the same bytes.
+Build the package with `uv build`; the wheel ships the same built file the repos vendor, so a pip-installed genome and a vendored genome are the same bytes. Publishing to PyPI is documented in [docs/PUBLISHING.md](docs/PUBLISHING.md) — the name is free and the build is verified, so it is a token and one command away.
 
 ## License
 
