@@ -1469,6 +1469,29 @@ def kb_registry(root: Path) -> None:
     # a KB with no CLI is reported as UNLINTED, not as a passing check
     assert "skip" in lint.stdout and "no CLI in this KB" in lint.stdout, lint.stdout
 
+    # THE DISPATCH: a dry run names every copy that is behind the shipped one and
+    # writes nothing. The reference is the registered skill/bin copy; a repo that
+    # vendors an OLDER CLI is the target.
+    sk = root / ".agents/skills/project-genome"; (sk / "scripts").mkdir(parents=True)
+    shutil.copyfile(G, sk / "scripts" / "genome")
+    old = root / "repos" / "old"; (old / "scripts").mkdir(parents=True)
+    shutil.copyfile(G, old / "scripts" / "genome")
+    oldcli = old / "scripts" / "genome"
+    oldcli.write_text(oldcli.read_text().replace('VERSION = "2026.', 'VERSION = "2025.'))
+    (old / "genome.toml").write_text('[genome]\nmodules = ["core"]\n')
+    run(root, "installs", "register", "skill", str(sk), env=env)
+    run(root, "installs", "register", "vendored", str(old), env=env)
+    d = run(root, "installs", "upgrade", env=env)
+    assert "DRY RUN" in d.stdout and str(old) in d.stdout, d.stdout
+    # the dry run CHANGED NOTHING
+    assert 'VERSION = "2025.' in oldcli.read_text(), "the dry run wrote to a peer repo"
+    # a KB with no CLI is not a dispatch target (there is nothing to upgrade there)
+    assert str(kb_nocli) not in d.stdout, d.stdout
+    # an UP-TO-DATE copy is not a target either: the dispatch names only what is
+    # behind, so the list IS the work queue and it must not contain current copies
+    assert str(sk) not in d.stdout, d.stdout
+    assert str(kb_bin) not in d.stdout, d.stdout
+
 
 @case
 def installs_registry(root: Path) -> None:

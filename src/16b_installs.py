@@ -152,9 +152,82 @@ def _git_sha(path: Path) -> str:
         return "-"
 
 
+def _repo_cli(path: Path) -> Path | None:
+    """The CLI a repo vendors, or None when it vendors none. bin/genome counts:
+    pioneer-qf ships its copy there, and looking only in scripts/ made it invisible."""
+    for cand in (path / "scripts" / "genome", path / "bin" / "genome"):
+        if cand.is_file():
+            return cand
+    return None
+
+
+def _dispatch_upgrade(rows: list, apply: bool) -> None:
+    """Dispatch an upgrade to every registered copy that is behind the shipped one.
+
+    Each repo is upgraded by ITS OWN vendored CLI, run inside that repo — the
+    vendored copy knows the repo's layout, and `upgrade` already refuses to swap a
+    copy that carries a local patch (it keeps the diff and asks first), so a patched
+    copy is never silently overwritten.
+
+    A DRY RUN is the default: this writes into other people's repositories, and a
+    fleet-wide rewrite is the operator's call. --apply performs it; every repo's
+    result is reported, and one failure does not stop the rest."""
+    skill_bin = [r for r in rows if r.get("kind") in ("skill", "bin")]
+    if not skill_bin:
+        die("no skill/bin copy registered to use as the shipped reference — "
+            "run install.sh first", ERR)
+    ref = max((_version_of(Path(r["path"])) for r in skill_bin), key=_version_key)
+    targets = []
+    for r in rows:
+        if r.get("kind") not in ("vendored", "kb"):
+            continue
+        p = Path(r["path"])
+        cli = _repo_cli(p)
+        if cli is None:
+            continue
+        v = _version_of(p)
+        if v and _version_key(v) < _version_key(ref):
+            targets.append((r, cli, v))
+    if not targets:
+        print(f"dispatch: nothing to upgrade (every registered copy is at {ref})")
+        return
+    print(f"dispatch: {len(targets)} cop(y/ies) behind {ref}"
+          + ("" if apply else " — DRY RUN (--apply performs the upgrade)"))
+    ok = skipped = failed = 0
+    for r, cli, v in targets:
+        cmd = [sys.executable, str(cli), "upgrade"] + (["--apply"] if apply else [])
+        try:
+            res = subprocess.run(cmd, cwd=str(Path(r["path"])), capture_output=True,
+                                 text=True, timeout=300)
+        except (OSError, subprocess.TimeoutExpired) as e:
+            print(f"ERROR  {r['path']} — {e}")
+            failed += 1
+            continue
+        out = (res.stdout + res.stderr).strip()
+        if res.returncode == 0:
+            ok += 1
+            print(f"{'upgraded' if apply else 'would upgrade':14} {r['path']}  {v} → {ref}")
+            for line in out.splitlines()[:2]:
+                print(f"        {line}")
+        elif "local edits" in out or "patch" in out.lower():
+            # the copy carries a local patch: `upgrade` refused, which is the right
+            # answer — it is reported, never forced through with --accept-patch-loss
+            skipped += 1
+            print(f"skipped (local patch)  {r['path']}  {v}")
+        else:
+            failed += 1
+            print(f"ERROR  {r['path']} — {out.splitlines()[0] if out else res.returncode}")
+    print(f"\ndispatch: {ok} ok, {skipped} skipped (local patch), {failed} failed")
+    if failed:
+        die(f"{failed} copy/copies failed to upgrade", ERR)
+
+
 def cmd_installs(args) -> None:
     """installs: list | verify | register | scan — the machine's genome installs, one manifest."""
-    if getattr(args, "installs_cmd", "list") == "list":
+    if args.installs_cmd == "upgrade":
+        _dispatch_upgrade(load_installs()["installs"], getattr(args, "apply", False))
+        return
+    if args.installs_cmd == "list":
         data = load_installs()
         rows = data["installs"]
         if not rows:
