@@ -42,7 +42,7 @@ Or, without a package manager:
 curl -fsSL https://raw.githubusercontent.com/ishan-parihar/project-genome/main/install.sh | bash
 ```
 
-The script tries `uv`, then `pipx`, then `pip --user`, and never installs into a system Python. On Windows: `irm https://raw.githubusercontent.com/ishan-parihar/project-genome/main/install.ps1 | iex`.
+The script tries `uv`, then `pipx`, then `pip --user`. Nothing is installed into a **system** Python: where `pip --user` is refused outright (the PEP 668 [externally-managed environments](https://peps.python.org/pep-0668/) that Debian, Ubuntu and Mint mark on their system Pythons — `/usr/lib/python3.14/EXTERNALLY-MANAGED`), the last rung falls back to an isolated venv at `$XDG_DATA_HOME/project-genome/tool`, which also makes re-running the installer always pick up the current build. On Windows: `irm https://raw.githubusercontent.com/ishan-parihar/project-genome/main/install.ps1 | iex`.
 
 **As an agent skill** — the methodology, the CLI, and the references, installed into the harnesses you have:
 
@@ -56,10 +56,10 @@ The CLI and the skill are separate deliverables. The package installs the tool; 
 
 | Concern | Answer |
 |---|---|
-| Files written | Inside your project only: `genome.toml` and the directories your module set declares. Two exceptions, both under `$HOME`: the install registry (`~/.config/genome/installs.json`) and the federation card cache (`~/.cache/genome/cards`). |
+| Files written | Inside your project only: `genome.toml` and the directories your module set declares. Two exceptions, both under `$HOME`: the install registry (`~/.config/genome/installs.json`) and the federation card cache (`~/.cache/genome/cards`). The installer writes one PATH line into your shell profile; where the isolated-venv rung runs it also creates `$XDG_DATA_HOME/project-genome/tool`. |
 | Network | None at run time. `genome upgrade` may fetch, only to compare a vendored copy's hash against the release ledger. |
 | Permissions | No root, no system paths. `uv`/`pipx` install into `~/.local/bin`; the installer adds that to your shell profile once (idempotent — re-running never duplicates the line). |
-| Uninstall | `uv tool uninstall project-genome` (or `pipx uninstall project-genome`). Inside a project, delete `genome.toml` and the genome-owned directories — your documents are plain markdown throughout. |
+| Uninstall | `uv tool uninstall project-genome` (or `pipx uninstall project-genome`, or `pip uninstall project-genome`). Where the installer fell back to an isolated venv, delete `$XDG_DATA_HOME/project-genome/tool`. Inside a project, delete `genome.toml` and the genome-owned directories — your documents are plain markdown throughout. |
 
 ## Getting started
 

@@ -35,6 +35,31 @@ function Die($msg) {
     exit 1
 }
 
+# The last rung of the chain, and it must actually reach the floor: pip --user is
+# REFUSED on an externally-managed Python (PEP 668, which Debian/Ubuntu/Mint mark
+# on their system Pythons and which also appears inside some Windows-managed
+# Pythons). An isolated venv is the one pip install that never touches a managed
+# Python, so fall back to it. Returns $true when the venv install succeeded and
+# leaves the venv's bin dir in $script:VenvBinDir for the verify step to check.
+$script:VenvBinDir = ''
+function New-IsolatedVenv($Pkg, $FromGitHub) {
+    $dir = Join-Path $env:LOCALAPPDATA 'project-genome\tool'
+    $script:VenvBinDir = Join-Path $dir 'Scripts'
+    Info "pip --user was refused - creating an isolated venv at $dir"
+    try {
+        & $py.Source -m venv --clear $dir
+        if ($LASTEXITCODE -ne 0) { Warn "could not create the venv at $dir"; return $false }
+        $pip = Join-Path $script:VenvBinDir 'pip.exe'
+        if ($FromGitHub) { & $pip install --quiet --force-reinstall "git+$Repo" }
+        else              { & $pip install --quiet --force-reinstall $Pkg }
+        if ($LASTEXITCODE -ne 0) { Warn "the venv pip install failed"; return $false }
+        return $true
+    } catch {
+        Warn "the venv fallback failed: $($_.Exception.Message)"
+        return $false
+    }
+}
+
 # ── root guard ───────────────────────────────────────────────────────────────
 # Root/Administrator-owned files break every later upgrade (the tool writes its
 # registry and cards under the user profile), so refuse by default.
@@ -73,7 +98,13 @@ if ($FromGitHub) {
         pipx install --force "git+$Repo"; $installedWith = 'pipx (from git)'
     }
     else {
-        & $py.Source -m pip install --user --force-reinstall "git+$Repo"; $installedWith = 'pip (from git)'
+        & $py.Source -m pip install --user --force-reinstall "git+$Repo"
+        if ($LASTEXITCODE -eq 0) {
+            $installedWith = 'pip --user (from git)'
+        }
+        elseif (New-IsolatedVenv $Pkg $true) {
+            $installedWith = 'pip (isolated venv, from git - system Python is externally-managed)'
+        }
     }
 }
 else {
@@ -94,8 +125,14 @@ else {
         pipx install --force $Pkg; $installedWith = 'pipx'
     }
     else {
-        Info "installing with pip --user"
-        & $py.Source -m pip install --user --upgrade $Pkg; $installedWith = 'pip --user'
+        Info "installing with pip"
+        & $py.Source -m pip install --user --upgrade $Pkg
+        if ($LASTEXITCODE -eq 0) {
+            $installedWith = 'pip --user'
+        }
+        elseif (New-IsolatedVenv $Pkg $false) {
+            $installedWith = 'pip (isolated venv - system Python is externally-managed)'
+        }
     }
 }
 if (-not $installedWith) { Die "the install did not report a successful method — see the errors above" }
@@ -114,9 +151,17 @@ if (($userPath -split ';') -notcontains $binDir) {
 $env:Path = "$binDir;$env:Path"
 
 # ── verify ──────────────────────────────────────────────────────────────────
-$genomeCmd = Get-Command $Name -ErrorAction SilentlyContinue
+# Check the binary THIS run installed, the same rule the bash installer follows:
+# on a machine that already had a genome somewhere on PATH, verifying that one
+# reports success for a stale build while the copy just installed sits unchecked.
+# The venv rung's bin dir is not on PATH yet, so look there first.
+$genomeCmd = $null
+if ($script:VenvBinDir -and (Test-Path (Join-Path $script:VenvBinDir "$Name.exe"))) {
+    $genomeCmd = Get-Item (Join-Path $script:VenvBinDir "$Name.exe")
+}
+if (-not $genomeCmd) { $genomeCmd = Get-Command $Name -ErrorAction SilentlyContinue }
 if (-not $genomeCmd -and (Test-Path (Join-Path $binDir "$Name.exe"))) {
-    $genomeCmd = Get-Command (Join-Path $binDir "$Name.exe") -ErrorAction SilentlyContinue
+    $genomeCmd = Get-Item (Join-Path $binDir "$Name.exe")
 }
 if (-not $genomeCmd) { Die "$Name is not on PATH — open a new shell and re-run, or add $binDir to your PATH" }
 $versionOut = & $genomeCmd.Source --version 2>&1
