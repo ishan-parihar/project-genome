@@ -9,13 +9,20 @@
 #
 # The registry is one JSON manifest in the user's home, written by install.sh
 # and by `genome installs register`, read by `genome installs list|verify`:
-#   {"schema": 1, "installs": [{"kind": "skill|bin|vendored", "path": "...",
+#   {"schema": 1, "installs": [{"kind": "skill|bin|vendored|kb", "path": "...",
 #     "version": "...", "registered": "ISO8601", "note": "..."}]}
 # `kind` drives the upgrade advice: skills roots are updatable by install.sh's
 # update branch, bins are re-linked by it, vendored copies upgrade via
 # `genome upgrade --apply` (or `git pull` where the repo tracks them).
 # A vendored entry is informational — this CLI never writes outside the home
 # manifest without a command that names the target.
+#
+# `kb` is the knowledge-base kind: a directory holding genome.toml (or the legacy
+# kb.toml) that may or may not vendor a CLI copy. It exists because every activated
+# genome is a KB whether or not it vendors the CLI, and the vendored rows alone left
+# three live KBs off the registry (the meta-root, pioneer-qf, and a nested KB that
+# defers to its parent). A kb row with no local CLI reads version 'none' — present
+# and legitimate, nothing to compare — and is never reported as a broken install.
 
 import json
 import os
@@ -74,7 +81,7 @@ def _verify_against_shipped(rows: list) -> None:
     behind, unknown = [], []
     for r in rows:
         v = live[r["path"]]
-        if v == "missing":
+        if v in ("missing", "none"):
             continue
         if _version_key(v) < _version_key(ref):
             behind.append((r, v))
@@ -92,25 +99,45 @@ def _verify_against_shipped(rows: list) -> None:
 
 def _script_of(path: Path) -> Path:
     """A registered path's genome script: the path itself when it is one (bin symlink or vendored
-    scripts/genome), or the skills root's scripts/genome when the path is the root directory."""
+    scripts/genome), or the skills root's scripts/genome when the path is the root directory.
+
+    A repo can vendor the CLI somewhere other than scripts/genome — pioneer-qf ships
+    bin/genome — so both are probed. A path that has neither is a KB with no local CLI
+    (the meta-root, a nested KB that defers to its parent): that is not 'missing', it is
+    'no CLI here', and the caller must not report it as a broken install."""
     p = path
     if p.is_dir():
-        p = p / "scripts" / "genome"
+        for cand in (p / "scripts" / "genome", p / "bin" / "genome"):
+            if cand.exists():
+                return cand
+        return p / "scripts" / "genome"  # the canonical location, absent — reported as such
     return p
 
 
+def _is_kb(path: Path) -> bool:
+    """A directory is an activated knowledge base when it holds genome.toml (or the
+    legacy kb.toml). A KB may vendor no CLI at all — the meta-root and a nested KB
+    that defers to its parent are both legitimate — so 'no local CLI' is a fact about
+    the KB, not a broken install."""
+    return (path / "genome.toml").is_file() or (path / "kb.toml").is_file()
+
+
 def _version_of(path: Path) -> str:
-    """A registered install's VERSION stamp, or 'missing'/'?' — the same regex `upgrade` trusts."""
+    """A registered install's VERSION stamp, or 'missing'/'?' — the same regex `upgrade` trusts.
+
+    A kb row with no local CLI reads 'none', not 'missing': the KB is present and
+    working, it simply has no copy of the CLI to compare against. Reporting it as
+    MISSING would put a healthy KB on the broken list."""
     p = _script_of(path)
     if not p.exists():
-        return "missing"
+        return "none" if _is_kb(path) else "missing"
     if p.is_symlink():
         try:
             p = p.resolve()
         except OSError:
             return "?"
     if not p.is_file():
-        return "missing"
+        return "none" if _is_kb(path) else "missing"
     m = re.search(r'^VERSION = "([^"]+)"', p.read_text(errors="replace"), re.M)
     return m.group(1) if m else "?"
 
@@ -145,8 +172,8 @@ def cmd_installs(args) -> None:
         # operator manages, and resolving it would point the registry inside a skills
         # root that install.sh updates separately. _version_of reads through the link.
         path = str(raw) if raw.is_absolute() else str(raw.resolve())
-        if kind not in ("skill", "bin", "vendored"):
-            die(f"kind must be skill | bin | vendored (got {kind})", ERR)
+        if kind not in ("skill", "bin", "vendored", "kb"):
+            die(f"kind must be skill | bin | vendored | kb (got {kind})", ERR)
         data = load_installs()
         rows = [r for r in data["installs"] if r["path"] != path]
         rows.append({"kind": kind, "path": path,
@@ -175,6 +202,9 @@ def cmd_installs(args) -> None:
             v = _version_of(p)
             if v == "missing":
                 broken.append((r, v))
+            elif v == "none":
+                # a KB with no local CLI: present and legitimate, nothing to compare
+                continue
             elif r.get("version") and r["version"] != "?" and v != r["version"]:
                 stale.append((r, v))
         for r, v in broken:
@@ -195,6 +225,20 @@ def cmd_installs(args) -> None:
         resolved_known = {k for r in load_installs()["installs"]
                           for k in (r["path"], str(_script_of(Path(r["path"])).resolve()))}
         found = []
+        # An ACTIVATED GENOME sweep: a directory holding genome.toml (or the legacy
+        # kb.toml) is a knowledge base, whether or not it vendors a CLI copy. Walking
+        # a root for those is how a repo that has no scripts/genome — a meta-root, a
+        # nested KB that defers to its parent — still reaches the registry, and it is
+        # the sweep that finds KBs nobody registered by hand.
+        for root in (getattr(args, "roots", None) or []):
+            rp = Path(root).expanduser().resolve()
+            if not rp.is_dir():
+                die(f"scan root is not a directory: {rp}", ERR)
+            for cand in sorted(rp.rglob("genome.toml")) + sorted(rp.rglob("kb.toml")):
+                d = cand.parent
+                if not any(x in d.parts for x in (".git", "node_modules", "target", ".venv", "venv", "__pycache__")):
+                    if str(d) not in known:
+                        found.append(("kb", str(d)))
         for root in ("~/.agents/skills/project-genome", "~/.claude/skills/project-genome",
                      "~/.operant/skills/project-genome", "~/.local/share/agents/skills/project-genome",
                      "~/Library/Application Support/agents/skills/project-genome"):

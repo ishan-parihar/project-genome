@@ -117,7 +117,7 @@ ERR = 2
 MIN_CHUNK = 5  # lines; `ask` hits narrower than this point at a lead line without its content
 HUB_NODE_CAP = 3000  # nodes; above this `graph hubs` ranks by degree and says betweenness was not computed
 _TMP_SEQ = itertools.count()  # makes each atomic_write temp name unique within this process too
-VERSION = "2026.10.28-18"
+VERSION = "2026.10.29-19"
 # every key genome reads: an unknown key is a typo that would silently switch a check off (E017)
 CONFIG_KEYS = {
     "genome": {"modules", "schema_version"},
@@ -2982,13 +2982,20 @@ def cmd_prereg(args) -> None:
 #
 # The registry is one JSON manifest in the user's home, written by install.sh
 # and by `genome installs register`, read by `genome installs list|verify`:
-#   {"schema": 1, "installs": [{"kind": "skill|bin|vendored", "path": "...",
+#   {"schema": 1, "installs": [{"kind": "skill|bin|vendored|kb", "path": "...",
 #     "version": "...", "registered": "ISO8601", "note": "..."}]}
 # `kind` drives the upgrade advice: skills roots are updatable by install.sh's
 # update branch, bins are re-linked by it, vendored copies upgrade via
 # `genome upgrade --apply` (or `git pull` where the repo tracks them).
 # A vendored entry is informational — this CLI never writes outside the home
 # manifest without a command that names the target.
+#
+# `kb` is the knowledge-base kind: a directory holding genome.toml (or the legacy
+# kb.toml) that may or may not vendor a CLI copy. It exists because every activated
+# genome is a KB whether or not it vendors the CLI, and the vendored rows alone left
+# three live KBs off the registry (the meta-root, pioneer-qf, and a nested KB that
+# defers to its parent). A kb row with no local CLI reads version 'none' — present
+# and legitimate, nothing to compare — and is never reported as a broken install.
 
 import json
 import os
@@ -3047,7 +3054,7 @@ def _verify_against_shipped(rows: list) -> None:
     behind, unknown = [], []
     for r in rows:
         v = live[r["path"]]
-        if v == "missing":
+        if v in ("missing", "none"):
             continue
         if _version_key(v) < _version_key(ref):
             behind.append((r, v))
@@ -3065,25 +3072,45 @@ def _verify_against_shipped(rows: list) -> None:
 
 def _script_of(path: Path) -> Path:
     """A registered path's genome script: the path itself when it is one (bin symlink or vendored
-    scripts/genome), or the skills root's scripts/genome when the path is the root directory."""
+    scripts/genome), or the skills root's scripts/genome when the path is the root directory.
+
+    A repo can vendor the CLI somewhere other than scripts/genome — pioneer-qf ships
+    bin/genome — so both are probed. A path that has neither is a KB with no local CLI
+    (the meta-root, a nested KB that defers to its parent): that is not 'missing', it is
+    'no CLI here', and the caller must not report it as a broken install."""
     p = path
     if p.is_dir():
-        p = p / "scripts" / "genome"
+        for cand in (p / "scripts" / "genome", p / "bin" / "genome"):
+            if cand.exists():
+                return cand
+        return p / "scripts" / "genome"  # the canonical location, absent — reported as such
     return p
 
 
+def _is_kb(path: Path) -> bool:
+    """A directory is an activated knowledge base when it holds genome.toml (or the
+    legacy kb.toml). A KB may vendor no CLI at all — the meta-root and a nested KB
+    that defers to its parent are both legitimate — so 'no local CLI' is a fact about
+    the KB, not a broken install."""
+    return (path / "genome.toml").is_file() or (path / "kb.toml").is_file()
+
+
 def _version_of(path: Path) -> str:
-    """A registered install's VERSION stamp, or 'missing'/'?' — the same regex `upgrade` trusts."""
+    """A registered install's VERSION stamp, or 'missing'/'?' — the same regex `upgrade` trusts.
+
+    A kb row with no local CLI reads 'none', not 'missing': the KB is present and
+    working, it simply has no copy of the CLI to compare against. Reporting it as
+    MISSING would put a healthy KB on the broken list."""
     p = _script_of(path)
     if not p.exists():
-        return "missing"
+        return "none" if _is_kb(path) else "missing"
     if p.is_symlink():
         try:
             p = p.resolve()
         except OSError:
             return "?"
     if not p.is_file():
-        return "missing"
+        return "none" if _is_kb(path) else "missing"
     m = re.search(r'^VERSION = "([^"]+)"', p.read_text(errors="replace"), re.M)
     return m.group(1) if m else "?"
 
@@ -3118,8 +3145,8 @@ def cmd_installs(args) -> None:
         # operator manages, and resolving it would point the registry inside a skills
         # root that install.sh updates separately. _version_of reads through the link.
         path = str(raw) if raw.is_absolute() else str(raw.resolve())
-        if kind not in ("skill", "bin", "vendored"):
-            die(f"kind must be skill | bin | vendored (got {kind})", ERR)
+        if kind not in ("skill", "bin", "vendored", "kb"):
+            die(f"kind must be skill | bin | vendored | kb (got {kind})", ERR)
         data = load_installs()
         rows = [r for r in data["installs"] if r["path"] != path]
         rows.append({"kind": kind, "path": path,
@@ -3148,6 +3175,9 @@ def cmd_installs(args) -> None:
             v = _version_of(p)
             if v == "missing":
                 broken.append((r, v))
+            elif v == "none":
+                # a KB with no local CLI: present and legitimate, nothing to compare
+                continue
             elif r.get("version") and r["version"] != "?" and v != r["version"]:
                 stale.append((r, v))
         for r, v in broken:
@@ -3168,6 +3198,20 @@ def cmd_installs(args) -> None:
         resolved_known = {k for r in load_installs()["installs"]
                           for k in (r["path"], str(_script_of(Path(r["path"])).resolve()))}
         found = []
+        # An ACTIVATED GENOME sweep: a directory holding genome.toml (or the legacy
+        # kb.toml) is a knowledge base, whether or not it vendors a CLI copy. Walking
+        # a root for those is how a repo that has no scripts/genome — a meta-root, a
+        # nested KB that defers to its parent — still reaches the registry, and it is
+        # the sweep that finds KBs nobody registered by hand.
+        for root in (getattr(args, "roots", None) or []):
+            rp = Path(root).expanduser().resolve()
+            if not rp.is_dir():
+                die(f"scan root is not a directory: {rp}", ERR)
+            for cand in sorted(rp.rglob("genome.toml")) + sorted(rp.rglob("kb.toml")):
+                d = cand.parent
+                if not any(x in d.parts for x in (".git", "node_modules", "target", ".venv", "venv", "__pycache__")):
+                    if str(d) not in known:
+                        found.append(("kb", str(d)))
         for root in ("~/.agents/skills/project-genome", "~/.claude/skills/project-genome",
                      "~/.operant/skills/project-genome", "~/.local/share/agents/skills/project-genome",
                      "~/Library/Application Support/agents/skills/project-genome"):
@@ -3198,6 +3242,188 @@ def cmd_installs(args) -> None:
 def today_iso() -> str:
     import datetime
     return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M")
+# ---------------------------------------------------------------- the KB registry view
+
+# The install registry (16b) tracks WHERE the CLI is installed, so an upgrade reaches
+# every copy. This module adds the other half: WHERE THE KNOWLEDGE BASES ARE, so a
+# genome in any working directory can reach any KB on the machine.
+#
+# Two questions drove it:
+#   1. "which KBs exist?" — the install registry only knew the repos that VENDOR the
+#      CLI, and every activated genome is a KB whether or not it vendors a copy. A KB
+#      with no local CLI (the meta-root, a nested KB that defers to its parent) was
+#      invisible, and so was a repo that vendors at bin/genome instead of scripts/genome.
+#   2. "can I reach them?" — genome resolves its config by walking UP from the cwd, so
+#      from an unrelated directory there is no genome to run against another repo's KB.
+#      A registry of KB paths turns "the KB you want" into an addressable target.
+#
+# The registry manifest is the single source of truth: `genome installs register kb
+# <path>` writes a row, `genome kb list` reads them, `genome kb lint` walks them.
+# Nothing here writes into a peer repo — it reads their configs and their lint.
+
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+
+def kb_rows() -> list[dict]:
+    """Every registry row that names an activated knowledge base.
+
+    A row is a KB when its directory holds genome.toml or the legacy kb.toml. The 78
+    vendored CLI copies are ALSO knowledge bases (each carries a .genome/ state dir),
+    so they are included here — that is what makes 'lint every KB' reach the whole
+    estate rather than only the repos that happen to lack a local CLI."""
+    data = load_installs()
+    out = []
+    for r in data["installs"]:
+        p = Path(r["path"])
+        if not p.is_dir():
+            continue
+        if (p / "genome.toml").is_file() or (p / "kb.toml").is_file():
+            out.append(r)
+    return out
+
+
+def _kb_label(path: Path, root: Path | None = None) -> str:
+    """A KB's short name, disambiguated when two KBs share a basename.
+
+    Two 'holon' KBs exist on this machine (holon/ and holon-personal/holon/), and a
+    name that silently picks one is the kind of ambiguity that makes an agent act on
+    the wrong KB. A collision gets the path relative to the COMMON ROOT of the
+    colliding KBs — relative to the parent of one of them, the nested KB would still
+    read as plain 'holon'."""
+    name = path.name
+    same = [Path(r["path"]) for r in kb_rows() if Path(r["path"]).name == name]
+    if len(same) <= 1:
+        return name
+    # the deepest common ancestor of the colliding KBs: the root both share
+    common = Path(os.path.commonpath([str(p) for p in same]))
+    try:
+        return str(path.relative_to(common))
+    except ValueError:
+        return str(path)
+
+
+def resolve_kb(target: str) -> Path:
+    """Find the KB an operator means by name or path, from ANY working directory.
+
+    A path that exists wins (it is unambiguous). Otherwise the name is matched against
+    every registered KB: an exact path match, a path suffix match, then a basename
+    match. An ambiguous basename is an error naming the candidates, never a guess."""
+    t = Path(target).expanduser()
+    if t.is_absolute() and t.is_dir():
+        return t.resolve()
+    rows = kb_rows()
+    if not rows:
+        die("no knowledge bases registered — `genome installs register kb <path>` "
+            "for each activated genome (the dirs holding genome.toml / kb.toml)", ERR)
+    # an exact path, as given or as a suffix of a registered path
+    exact = [r for r in rows if str(r["path"]) == str(t)]
+    if exact:
+        return Path(exact[0]["path"]).resolve()
+    suff = [r for r in rows if str(r["path"]).endswith(str(t))]
+    if len(suff) == 1:
+        return Path(suff[0]["path"]).resolve()
+    if len(suff) > 1:
+        die(f"'{target}' matches several knowledge bases: " +
+            ", ".join(sorted(r["path"] for r in suff)) + " — name one by full path", ERR)
+    base = [r for r in rows if Path(r["path"]).name == t.name]
+    if len(base) == 1:
+        return Path(base[0]["path"]).resolve()
+    if len(base) > 1:
+        die(f"'{target}' matches several knowledge bases: " +
+            ", ".join(sorted(r["path"] for r in base)) + " — name one by full path", ERR)
+    die(f"no knowledge base named '{target}' ({len(rows)} registered — `genome kb list`)", ERR)
+
+
+def kb_lint_one(path: Path) -> tuple[int, int, list[str]]:
+    """Lint one KB by running ITS OWN vendored CLI, so the check is the KB's own rules.
+
+    A KB that vendors no CLI cannot lint itself; that is reported as 'no CLI here'
+    rather than silently counted as clean — the same rule the empty-registry fix
+    follows: an unproven thing is not a green thing."""
+    script = _script_of(path)
+    if not script.is_file():
+        return (0, 0, ["no CLI in this KB — nothing to lint with"])
+    try:
+        r = subprocess.run([sys.executable, str(script), "lint", "--json"],
+                           cwd=str(path), capture_output=True, text=True, timeout=180)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return (0, 0, [f"lint failed to run: {e}"])
+    out = r.stdout.strip()
+    if not out:
+        return (0, 0, [(r.stderr.strip().splitlines() or ["lint produced no output"])[-1]])
+    try:
+        j = json.loads(out)
+    except ValueError:
+        return (0, 0, [f"lint output was not JSON: {out[:120]}"])
+    errs = int(j.get("errors", 0))
+    warns = int(j.get("warnings", 0))
+    findings = [f"{f.get('code','?')}: {f.get('text','')}" for f in j.get("findings", [])][:3]
+    return (errs, warns, findings)
+
+
+def cmd_kb(args) -> None:
+    """kb: list | lint | show — the machine's knowledge bases, reachable from anywhere."""
+    cmd = getattr(args, "kb_cmd", "list")
+    if cmd == "list":
+        rows = kb_rows()
+        if not rows:
+            print("no knowledge bases registered — `genome installs register kb <path>`")
+            return
+        for r in sorted(rows, key=lambda r: r["path"]):
+            p = Path(r["path"])
+            print(f"{_kb_label(p):34} {p}  [{r.get('kind','?')}]")
+        print(f"\n{len(rows)} knowledge base(s) registered")
+        return
+    if cmd == "show":
+        p = resolve_kb(args.target)
+        cfg = find_cfg(p)
+        print(f"root: {cfg.root}")
+        print(f"modules: {', '.join(sorted(cfg.modules))}")
+        print(f"legacy kb.toml: {cfg.legacy}")
+        for role in sorted(cfg.paths):
+            print(f"  {role:10} {cfg.paths[role]}")
+        return
+    if cmd == "lint":
+        # --all: every registered KB. Without it: the named one (or the cwd's).
+        targets = []
+        if getattr(args, "all", False):
+            targets = [Path(r["path"]) for r in sorted(kb_rows(), key=lambda r: r["path"])]
+            if not targets:
+                die("no knowledge bases registered — nothing to lint", ERR)
+        elif getattr(args, "target", None):
+            targets = [resolve_kb(args.target)]
+        else:
+            targets = [find_cfg().root]
+        total_e = total_w = 0
+        failures = []
+        no_cli = []
+        for t in targets:
+            errs, warns, findings = kb_lint_one(t)
+            total_e += errs
+            total_w += warns
+            label = _kb_label(t)
+            if findings and findings[0].startswith("no CLI"):
+                # a KB with no local CLI is UNLINTED, not clean: saying 'ok' here
+                # would read as a passing check that never ran
+                no_cli.append(label)
+                print(f"skip  {label:34} no CLI in this KB — nothing to lint with")
+                continue
+            status = "ok" if not errs and not findings else ("FAIL" if errs else "warn")
+            print(f"{status:5} {label:34} {errs} error(s), {warns} warning(s)")
+            for f in findings:
+                print(f"        {f}")
+            if errs:
+                failures.append(label)
+        print(f"\nkb lint: {len(targets)} KB(s), {total_e} error(s), {total_w} warning(s)"
+              + (f", {len(no_cli)} with no CLI to lint with" if no_cli else ""))
+        if failures:
+            die(f"{len(failures)} KB(s) with errors: {', '.join(failures)}", ERR)
+        return
+    die(f"unknown kb subcommand {cmd}", ERR)
 # ---------------------------------------------------------------- agents commands
 
 def agent_id(args) -> str:
@@ -6371,11 +6597,18 @@ def main() -> None:
 
     s = add("installs", cmd_installs, "the machine's genome installs: list | verify | register | scan")
     s.add_argument("installs_cmd", choices=["list", "verify", "register", "scan"])
-    s.add_argument("kind", nargs="?", help="register: skill | bin | vendored")
+    s.add_argument("kind", nargs="?", help="register: skill | bin | vendored | kb")
     s.add_argument("path", nargs="?", help="register: the install path (absolute or ~)")
     s.add_argument("--note")
     s.add_argument("--against-shipped", action="store_true", dest="against_shipped",
                    help="verify: compare every install against the freshest skill/bin copy, not against its own registration")
+    s.add_argument("--roots", nargs="*", default=None,
+                   help="scan: directories to sweep for activated genomes (genome.toml / kb.toml) the manifest does not know")
+
+    s = add("kb", cmd_kb, "the machine's knowledge bases: list | show | lint (reachable from anywhere)")
+    s.add_argument("kb_cmd", choices=["list", "show", "lint"])
+    s.add_argument("target", nargs="?", help="show/lint: a KB name or path (omit for the cwd's KB)")
+    s.add_argument("--all", action="store_true", help="lint: every registered KB")
 
     s = add("wf", cmd_wf, "workflow boards: new | add | list")
     s.add_argument("wf_cmd", choices=["new", "add", "list"]); s.add_argument("name", nargs="?")

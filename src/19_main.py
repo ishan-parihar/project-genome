@@ -147,11 +147,18 @@ def main() -> None:
 
     s = add("installs", cmd_installs, "the machine's genome installs: list | verify | register | scan")
     s.add_argument("installs_cmd", choices=["list", "verify", "register", "scan"])
-    s.add_argument("kind", nargs="?", help="register: skill | bin | vendored")
+    s.add_argument("kind", nargs="?", help="register: skill | bin | vendored | kb")
     s.add_argument("path", nargs="?", help="register: the install path (absolute or ~)")
     s.add_argument("--note")
     s.add_argument("--against-shipped", action="store_true", dest="against_shipped",
                    help="verify: compare every install against the freshest skill/bin copy, not against its own registration")
+    s.add_argument("--roots", nargs="*", default=None,
+                   help="scan: directories to sweep for activated genomes (genome.toml / kb.toml) the manifest does not know")
+
+    s = add("kb", cmd_kb, "the machine's knowledge bases: list | show | lint (reachable from anywhere)")
+    s.add_argument("kb_cmd", choices=["list", "show", "lint"])
+    s.add_argument("target", nargs="?", help="show/lint: a KB name or path (omit for the cwd's KB)")
+    s.add_argument("--all", action="store_true", help="lint: every registered KB")
 
     s = add("wf", cmd_wf, "workflow boards: new | add | list")
     s.add_argument("wf_cmd", choices=["new", "add", "list"]); s.add_argument("name", nargs="?")

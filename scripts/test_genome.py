@@ -1403,6 +1403,74 @@ def p4_evidence_graph(root: Path) -> None:
 
 
 @case
+def kb_registry(root: Path) -> None:
+    """the KB registry: activated genomes found by sweep, reachable by name, lintable from anywhere"""
+    import json, os
+    man = root / "installs.json"
+    # isolate PATH and HOME: scan also probes the host's PATH bins, and a case that
+    # sees the real machine's ~/.local/bin/genome is testing the host, not the code
+    iso_bin = root / "emptybin"; iso_bin.mkdir()
+    env = {"GENOME_INSTALLS": str(man), "HOME": str(root), "PATH": str(iso_bin) + ":/usr/bin:/bin"}
+    # a KB that VENDORS the CLI at bin/genome (not scripts/genome) — the layout that
+    # made pioneer-qf invisible: the old _script_of looked only in scripts/
+    kb_bin = root / "repos" / "bin-kb"; (kb_bin / "bin").mkdir(parents=True)
+    shutil.copyfile(G, kb_bin / "bin" / "genome")
+    (kb_bin / "genome.toml").write_text('[genome]\nmodules = ["core"]\n')
+    # a KB with NO local CLI at all (the meta-root shape)
+    kb_nocli = root / "repos" / "meta-root"; kb_nocli.mkdir(parents=True)
+    (kb_nocli / "genome.toml").write_text('[genome]\nmodules = ["core"]\n')
+    # two KBs sharing a basename: addressing must not silently pick one
+    a = root / "repos" / "x" / "dup"; (a).mkdir(parents=True)
+    (a / "genome.toml").write_text('[genome]\nmodules = ["core"]\n')
+    b = root / "repos" / "y" / "dup"; (b).mkdir(parents=True)
+    (b / "genome.toml").write_text('[genome]\nmodules = ["core"]\n')
+
+    # THE SWEEP: scan --roots finds activated genomes the manifest does not know
+    s = run(root, "installs", "scan", "--roots", str(root / "repos"), ok=False, env=env)
+    assert s.returncode == 2 and "unregistered kb" in s.stdout, (s.returncode, s.stdout)
+    for p in (kb_bin, kb_nocli, a, b):
+        assert str(p) in s.stdout, f"sweep missed {p}"
+    # registering them makes the sweep clean
+    for p in (kb_bin, kb_nocli, a, b):
+        run(root, "installs", "register", "kb", str(p), env=env)
+    s2 = run(root, "installs", "scan", "--roots", str(root / "repos"), env=env)
+    assert "no unregistered installs found" in s2.stdout, s2.stdout
+
+    # kb list sees every registered KB
+    lst = run(root, "kb", "list", env=env)
+    assert "4 knowledge base(s) registered" in lst.stdout, lst.stdout
+
+    # THE BIN/GENOME GAP: a repo whose CLI lives at bin/genome is NOT missing, and
+    # its version is read — the old code reported 'missing' for pioneer-qf
+    v = run(root, "installs", "verify", env=env)
+    assert "MISSING" not in v.stdout, v.stdout
+    rows = json.loads(man.read_text())["installs"]
+    binrow = [r for r in rows if r["path"] == str(kb_bin)][0]
+    assert binrow["version"] != "none" and binrow["version"] != "missing", binrow
+    # a KB with no local CLI reads 'none' (present, nothing to compare) — not MISSING
+    noclirow = [r for r in rows if r["path"] == str(kb_nocli)][0]
+    assert noclirow["version"] == "none", noclirow
+
+    # REACHABLE FROM ANYWHERE: resolve a KB by name from an unrelated cwd
+    away = root / "elsewhere"; away.mkdir()
+    sh = run(away, "kb", "show", "bin-kb", env=env)
+    assert str(kb_bin) in sh.stdout, sh.stdout
+    # a basename collision is an error naming the candidates, never a guess
+    # (die writes to stderr — that is where the candidates are named)
+    amb = run(away, "kb", "show", "dup", ok=False, env=env)
+    assert amb.returncode == 2 and "several knowledge bases" in amb.stderr, (amb.returncode, amb.stdout, amb.stderr)
+    # ... and a full path disambiguates it
+    sh2 = run(away, "kb", "show", str(a), env=env)
+    assert str(a) in sh2.stdout, sh2.stdout
+
+    # LINT ACROSS THE ESTATE: every registered KB, each with its own CLI, from any cwd
+    lint = run(away, "kb", "lint", "--all", env=env)
+    assert "4 KB(s)" in lint.stdout, lint.stdout
+    # a KB with no CLI is reported as UNLINTED, not as a passing check
+    assert "skip" in lint.stdout and "no CLI in this KB" in lint.stdout, lint.stdout
+
+
+@case
 def installs_registry(root: Path) -> None:
     """installs: register/list/verify/scan round-trip, drift and missing detection, dedupe by path"""
     import json, os
