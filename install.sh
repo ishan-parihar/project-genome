@@ -24,6 +24,10 @@ REPO="https://github.com/ishan-parihar/project-genome.git"
 BRANCH="main"
 TARGET_NAME="project-genome"
 BIN_DIR="$HOME/.local/bin"
+# Where this install puts things that are not on a tool's own PATH: the isolated
+# venv the pip rung falls back to on an externally-managed Python, and its bin.
+# Defaults under XDG data so a read-only or unusual HOME cannot break the install.
+PREFIX="${XDG_DATA_HOME:-$HOME/.local/share}/project-genome"
 MIN_PY_MINOR=11
 
 if [ -t 1 ]; then
@@ -49,6 +53,15 @@ while [ $# -gt 0 ]; do
     *) die "Unknown option: $1 (supported: --skill, --dir <path>, --from-github, --no-cta, --force-root)" ;;
   esac
 done
+
+# The bundle is a separate explicit step rather than a surprise side effect of
+# the CLI install. Check the prerequisite HERE, at request time: a git-less host
+# that only learns this after the CLI rungs have run is a host holding a partial
+# install and a confusing tail (observed: '--skill needs git' printed after a
+# bundle-less install, exit 1, with no advice in reach).
+if [ "$SKIP_SKILL" = "0" ]; then
+  command -v git >/dev/null 2>&1 || die "--skill needs git to fetch the bundle — install git, install the CLI without --skill, or run the CLI-only install and add the bundle later"
+fi
 
 # ── [SECTION: root-guard] ───────────────────────────────────────────────────
 # Root-owned ~/.local breaks every later step (the tool writes its registry and
@@ -104,8 +117,20 @@ if [ "$FROM_GITHUB" = "1" ]; then
     pipx install --force "git+$REPO" && installed_with="pipx (from git)"
     INSTALL_BIN_DIR="$(pipx environment --value PIPX_BIN_DIR 2>/dev/null || echo "$BIN_DIR")"
   else
-    python3 -m pip install --user --force-reinstall "git+$REPO" && installed_with="pip (from git)"
-    INSTALL_BIN_DIR="$("$HOME/.local/bin/python3" -c 'import sysconfig; print(sysconfig.get_path("scripts", scheme="posix_user"))' 2>/dev/null || echo "$BIN_DIR")"
+    # rung 3, and the floor must actually reach the floor: on Debian/Ubuntu the
+    # system Python is PEP 668 externally-managed, so `pip install --user` is
+    # REFUSED outright (verified on this host's /usr/bin/python3.14, whose
+    # /usr/lib/python3.14/EXTERNALLY-MANAGED makes even --user an error). A chain
+    # whose last rung cannot succeed on the most common Linux distros is not a
+    # chain. So detect the refusal and fall back to an isolated venv, which is
+    # the one form of pip install that never needs to touch a managed Python.
+    if python3 -m pip install --user --force-reinstall "git+$REPO" 2>/dev/null; then
+      installed_with="pip --user (from git)"
+    elif python3 -m venv "$PREFIX/tool" >/dev/null 2>&1 \
+         && "$PREFIX/tool/bin/pip" install --quiet --force-reinstall "git+$REPO"; then
+      installed_with="pip (isolated venv, from git — system Python is externally-managed)"
+    fi
+    INSTALL_BIN_DIR="$PREFIX/tool/bin"
   fi
 elif command -v uv >/dev/null 2>&1; then
   info "installing with uv"
@@ -127,9 +152,14 @@ elif command -v pipx >/dev/null 2>&1; then
   pipx install --force "$PKG" && installed_with="pipx"
   INSTALL_BIN_DIR="$(pipx environment --value PIPX_BIN_DIR 2>/dev/null || echo "$BIN_DIR")"
 else
-  info "installing with pip --user"
-  python3 -m pip install --user --upgrade "$PKG" && installed_with="pip --user"
-  INSTALL_BIN_DIR="$(python3 -c 'import sysconfig; print(sysconfig.get_path("scripts", scheme="posix_user"))' 2>/dev/null || echo "$BIN_DIR")"
+  info "installing with pip"
+  if python3 -m pip install --user --upgrade "$PKG" 2>/dev/null; then
+    installed_with="pip --user"
+  elif python3 -m venv "$PREFIX/tool" >/dev/null 2>&1 \
+       && "$PREFIX/tool/bin/pip" install --quiet --force-reinstall "$PKG"; then
+    installed_with="pip (isolated venv — system Python is externally-managed)"
+  fi
+  INSTALL_BIN_DIR="$PREFIX/tool/bin"
 fi
 # The CLI is the point of the script, but a --skill run has a second explicit
 # request. When the package cannot be installed (typically: not published yet) and
@@ -223,7 +253,6 @@ register_install() {  # register_install <kind> <path> [note]
 # rule reference and the adoption guide — an agent needs that too, so it is a
 # separate, explicit step rather than a surprise side effect of the CLI install.
 if [ "$SKIP_SKILL" = "0" ]; then
-  command -v git >/dev/null 2>&1 || die "--skill needs git to fetch the bundle (install git, or drop --skill)"
   ROOTS=()
   for d in "$HOME/.agents/skills" "$HOME/.claude/skills" "$HOME/.zcode/skills" "$HOME/.codex/skills"; do
     [ -d "$d" ] && ROOTS+=("$d")
@@ -272,6 +301,23 @@ if [ "$CLI_UNMET" = "1" ]; then
   echo ""
   echo "  Usually this means $PKG is not on PyPI yet. Install the CLI with:"
   echo "    curl -fsSL https://raw.githubusercontent.com/ishan-parihar/project-genome/main/install.sh | bash -s -- --from-github"
+  echo ""
+  if [ "$installed_with" != "" ]; then
+    echo "  (it installed via $installed_with, so only the verification fell short"
+    echo "   — the binary did not resolve; check the PATH line above)"
+  fi
+  # The remedy above is only actionable if the machine can take it: --from-github
+  # needs git and needs the network. Say so instead of sending the operator back
+  # down a path this same machine just refused (observed on a host where both
+  # git and the PyPI rung were unavailable, and the advice repeated the failure).
+  if ! command -v git >/dev/null 2>&1; then
+    echo ""
+    echo "  This machine has no git, and --from-github needs it. Install git first,"
+    echo "  or install the CLI by hand:  python3 -m pip install --user $PKG"
+    echo "  (if pip refuses with 'externally-managed-environment', your Python is"
+    echo "   PEP 668 managed — use a venv:  python3 -m venv ~/.local/share/$PKG/tool &&"
+    echo "   ~/.local/share/$PKG/tool/bin/pip install $PKG)"
+  fi
   echo ""
 else
   echo "project-genome installed."
