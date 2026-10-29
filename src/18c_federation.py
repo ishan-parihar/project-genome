@@ -585,8 +585,34 @@ def apply_overrides(start: Path) -> None:
             return
 
 
+def installed_as_package() -> bool:
+    """True when this CLI is an INSTALLED package (pip/uv), not a repo's vendored copy.
+
+    A pip-installed genome lives in site-packages and has no skills root beside it.
+    That changes two things: the "compare against the skill copy" logic has nothing
+    to compare against (this copy IS the shipped one), and `upgrade` has no file to
+    swap. Detecting it by the package's own directory is honest and cheap: the
+    wrapper puts the CLI at site-packages/project_genome/_genome.py."""
+    try:
+        p = Path(__file__).resolve()
+    except OSError:
+        return False
+    return p.parent.name == "project_genome" or (p.parent / "__init__.py").is_file()
+
+
 def skill_copy() -> Path:
-    return Path(os.environ.get("GENOME_SKILL", "~/.agents/skills/project-genome/scripts/genome")).expanduser()
+    """The 'shipped' copy this repo's copy is compared against.
+
+    For a vendored copy: the skills root's genome (what install.sh keeps current).
+    For an INSTALLED package: the running script itself — there is no separate
+    shipped copy, so comparing against itself is the honest answer ('up to date')
+    rather than a failure about a file that does not exist."""
+    env = os.environ.get("GENOME_SKILL")
+    if env:
+        return Path(env).expanduser()
+    if installed_as_package():
+        return Path(__file__).resolve()
+    return Path("~/.agents/skills/project-genome/scripts/genome").expanduser()
 
 
 def file_version(text: str) -> str:

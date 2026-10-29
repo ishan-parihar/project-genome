@@ -1,183 +1,210 @@
 #!/usr/bin/env bash
-# project-genome installer — skill bundle profile.
-#
-# Installs the project-genome skill (SKILL.md + the stdlib genome CLI) into
-# your agent-harness skills directories, verifies the self-check, and prints
-# the one-line harness wiring. Idempotent: re-running updates an existing
-# install in place and never duplicates configuration.
+# project-genome installer — python-cli profile (uv → pipx → pip), plus the skill bundle.
 #
 #   curl -fsSL https://raw.githubusercontent.com/ishan-parihar/project-genome/main/install.sh | bash
 #
-# Flags: --dir <path> (extra skills root) · --no-cta (also: SKIP_CTA=1)
+# What it installs:
+#   1. the `genome` CLI, as a Python package (pip/uv/pipx) — the tool on any machine
+#   2. optionally (--skill) the project-genome SKILL bundle into the agent harnesses
+#      you have — the methodology + references that accompany the CLI
+#
+# Flags:
+#   --skill        also install the skill bundle into every detected harness
+#   --dir <path>   extra skills root (repeatable) for --skill
+#   --from-github  install the CLI from the Git repo instead of PyPI (unreleased builds)
+#   --no-cta       skip the star/donate epilogue (also: SKIP_CTA=1)
+#   --force-root   allow running as root (installs into $HOME of root)
 
 set -euo pipefail
+IFS=$'\n\t'
 
+NAME="genome"
+PKG="project-genome"
 REPO="https://github.com/ishan-parihar/project-genome.git"
 BRANCH="main"
 TARGET_NAME="project-genome"
+BIN_DIR="$HOME/.local/bin"
+MIN_PY_MINOR=11
 
-log()  { printf '  %s\n' "$*"; }
-fail() { printf 'FAIL: %s\n' "$*" >&2; printf '      fix it, then re-run this installer.\n' >&2; exit 1; }
+if [ -t 1 ]; then
+  B=$(printf '\033[1m'); G=$(printf '\033[1;32m'); Y=$(printf '\033[1;33m'); R=$(printf '\033[1;31m'); N=$(printf '\033[0m')
+else B=""; G=""; Y=""; R=""; N=""; fi
+info() { printf '%s\n' "${G}==>${N} ${B}$*${N}"; }
+warn() { printf '%s\n' "${Y}warn:${N} $*" >&2; }
+err()  { printf '%s\n' "${R}error:${N} $*" >&2; }
+die()  { err "$*"; printf '      fix it, then re-run this installer.\n' >&2; exit 1; }
 
-# ── [SECTION: prereqs] ────────────────────────────────────────────────────
-command -v git    >/dev/null 2>&1 || fail "git is not installed or not on PATH — install git (apt/dnf/pacman/brew install git)"
-command -v python3 >/dev/null 2>&1 || fail "python3 is not installed or not on PATH — project-genome needs Python >= 3.11 (stdlib only, no packages)"
-
-py_major=$("python3" -c 'import sys; print(sys.version_info[0])')
-py_minor=$("python3" -c 'import sys; print(sys.version_info[1])')
-if [ "$py_major" -lt 3 ] || { [ "$py_major" -eq 3 ] && [ "$py_minor" -lt 11 ]; }; then
-  fail "python3 is $py_major.$py_minor; project-genome needs >= 3.11 — upgrade Python"
-fi
-log "python3 $py_major.$py_minor ok"
-
-# ── [SECTION: os] platform detection (informational — this bundle ships no
-# compiled binaries, so glibc/musl and arch do not change the install path;
-# git and python3 do the platform work) ───────────────────────────────────
-OS="$(uname -s)"; ARCH="$(uname -m)"
-case "$OS" in
-  Linux|Darwin) log "platform: $OS/$ARCH" ;;
-  *) fail "unsupported platform: $OS — this installer covers Linux and macOS; on Windows use WSL, or install manually (git clone + python3 scripts/test_genome.py)" ;;
-esac
-
-# ── [SECTION: skills roots] detect, don't assume ──────────────────────────
-ROOTS=()
-for d in "$HOME/.agents/skills" "$HOME/.claude/skills" "$HOME/.zcode/skills" "$HOME/.codex/skills"; do
-  [ -d "$d" ] && ROOTS+=("$d")
-done
+# ── [SECTION: flags] ─────────────────────────────────────────────────────────
+SKIP_SKILL=1
+FROM_GITHUB=0
+EXTRA_DIRS=()
 while [ $# -gt 0 ]; do
   case "$1" in
-    --dir)   ROOTS+=("$2"); shift 2 ;;
-    --no-cta) SKIP_CTA=1; shift ;;
-    *) fail "unknown argument: $1 (supported: --dir <path>, --no-cta)" ;;
+    --skill)       SKIP_SKILL=0; shift ;;
+    --dir)         EXTRA_DIRS+=("$2"); shift 2 ;;
+    --from-github) FROM_GITHUB=1; shift ;;
+    --no-cta)      SKIP_CTA=1; shift ;;
+    --force-root)  FORCE_ROOT=1; shift ;;
+    --help|-h)     sed -n '2,16p' "$0"; exit 0 ;;
+    *) die "Unknown option: $1 (supported: --skill, --dir <path>, --from-github, --no-cta, --force-root)" ;;
   esac
 done
-if [ "${#ROOTS[@]}" -eq 0 ]; then
-  # No harness detected — install to the agent-neutral farm path anyway.
-  ROOTS+=("$HOME/.agents/skills")
-  log "no harness skills directory found — using ${ROOTS[0]}"
+
+# ── [SECTION: root-guard] ───────────────────────────────────────────────────
+# Root-owned ~/.local breaks every later step (the tool writes its registry and
+# its cards under $HOME). Refuse by default rather than produce a broken install.
+if [ "${EUID:-$(id -u)}" -eq 0 ] && [ "${FORCE_ROOT:-0}" != "1" ]; then
+  die "Don't run as root — this installs into \$HOME and root-owned files break later upgrades. Re-run as your user (override: --force-root)."
 fi
 
-# ── [SECTION: registry] record every install in the machine manifest ────
-# The registry (src/16b_installs.py) is how upgrades stop leaving stragglers:
-# install.sh registers each skills root and the PATH bin it wires; `genome
-# installs verify` reports drift; `genome installs scan` finds what the
-# installer missed. Bootstrap-safe: install.sh may run BEFORE any genome is
-# on PATH, so it calls the SOURCE clone's script directly with GENOME_INSTALLS
-# pointing at the manifest — `python3 $SRC/scripts/genome installs register`.
-register_install() {  # register_install <kind> <path> [note]
-  if python3 "$SRC_DIR/scripts/genome" installs register "$1" "$2" --note "${3:-via install.sh}" >/dev/null 2>&1; then
-    log "registered: $2"
-  else
-    log "WARN: could not register $2 in the installs manifest — genome installs scan will find it"
-  fi
-}
-SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-# ── [SECTION: install] clone-or-update into each detected root ────────────
-# Three install states, not two. The pre-installer era copied the skill by
-# rsync (no .git), and those copies can neither `git pull` nor be updated by
-# the update branch above — the installer used to fail on them and walk
-# away, stranding the machine on an old genome forever (observed: a
-# 2026.10.22 install that could not take the outline module). The third
-# branch migrates instead of failing: backup OUTSIDE the skills root (so a
-# broken harness scan does not pick the backup up as a second skill),
-# fresh clone, self-check, backup kept.
-INSTALLED=()
-for root in "${ROOTS[@]}"; do
-  dest="$root/$TARGET_NAME"
-  if [ -d "$dest/.git" ]; then
-    log "updating existing install: $dest"
-    git -C "$dest" fetch origin "$BRANCH" --quiet || fail "could not fetch $REPO (network?) — check connectivity and re-run"
-    git -C "$dest" reset --hard "origin/$BRANCH" --quiet || fail "could not update $dest — is another process holding it?"
-  elif [ -d "$dest" ]; then
-    backup="$HOME/.agents/skills-backup/${TARGET_NAME}-pre-git-$(date +%Y%m%d-%H%M%S)"
-    log "existing install is not a git checkout (pre-installer copy) — migrating"
-    mkdir -p "$(dirname "$backup")" \
-      && mv "$dest" "$backup" \
-      || fail "could not move $dest aside to $backup — check permissions and re-run"
-    log "old copy preserved at: $backup"
-    git clone --depth 1 --branch "$BRANCH" "$REPO" "$dest" --quiet 2>/dev/null \
-      || { mv "$backup" "$dest" 2>/dev/null || true
-           fail "clone failed after migration — old copy restored at $dest"; }
-    log "migrated: $dest (backup kept at $backup)"
-  else
-    mkdir -p "$root"
-    git clone --depth 1 --branch "$BRANCH" "$REPO" "$dest" --quiet 2>/dev/null \
-      || fail "could not clone $REPO into $dest — check the URL, connectivity, and that $root is writable"
-    log "installed: $dest"
-  fi
-  register_install skill "$dest"
-  INSTALLED+=("$dest")
-done
-
-# ── [SECTION: verify] the self-check, in the installed copy ───────────────
-PRIMARY="${INSTALLED[0]}"
-CASE_COUNT="$(grep -c '^@case' "$PRIMARY/scripts/test_genome.py" 2>/dev/null || echo 0)"
-# the case count comes from the file, not from a hand-kept number (it was 35 while the suite said 36)
-log "running the self-check ($CASE_COUNT cases, scratch-copy isolated)…"
-if ! "python3" "$PRIMARY/scripts/test_genome.py" >/dev/null 2>&1; then
-  "python3" "$PRIMARY/scripts/test_genome.py" | tail -5 || true
-  fail "the self-check failed in $PRIMARY — the install is not verified; do not use it"
+# ── [SECTION: os-arch] ──────────────────────────────────────────────────────
+OS="$(uname -s)"
+case "$OS" in
+  Linux*)  DISTRO="$(. /etc/os-release 2>/dev/null && echo "${ID:-unknown}")" ;;
+  Darwin*) DISTRO="macos" ;;
+  *) die "Unsupported OS: $OS — on Windows use install.ps1 (irm <url> | iex)" ;;
+esac
+ARCH="$(uname -m)"
+if [ "$DISTRO" = "macos" ] && sysctl -n hw.optional.arm64 2>/dev/null | grep -q 1; then
+  ARCH="arm64"   # uname -m lies under Rosetta
 fi
-log "self-check: ok"
+case "$ARCH" in x86_64|amd64) ARCH="x86_64" ;; aarch64|arm64) ARCH="arm64" ;; *) ARCH="unknown" ;; esac
+info "platform: $OS/$DISTRO/$ARCH"
 
-# ── [SECTION: summary + wiring] ───────────────────────────────────────────
-GENOME_BIN="$PRIMARY/scripts/genome"
-chmod +x "$GENOME_BIN"
+# ── [SECTION: prereqs] ──────────────────────────────────────────────────────
+# The CLI is stdlib only, so the ONLY hard requirement is a Python >= 3.11
+# interpreter. curl is needed only for the GitHub fallback path.
+command -v python3 >/dev/null 2>&1 || die "python3 is not installed or not on PATH — project-genome needs Python >= $MIN_PY_MINOR (stdlib only, no packages to install)"
+py_ver="$(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])')"
+py_ok="$(python3 -c 'import sys; print(1 if sys.version_info[:2] >= (3, 11) else 0)')"
+if [ "$py_ok" != "1" ]; then
+  die "python3 is $py_ver; project-genome needs >= 3.$MIN_PY_MINOR (it uses tomllib, added in 3.11). Upgrade Python, or point PATH at a newer interpreter."
+fi
+info "python3 $py_ver ok"
 
-# First-class install: `genome` must be on PATH before any agent goes
-# looking for it. The recurring failure this fixes is real: agents on fresh
-# boxes run `genome ...` from a project's AGENTS.md and fail with "genome:
-# command not found", then improvise a path guess. Two routes, tried in order:
-#   1. ~/.local/bin (user-writable, standard, on PATH for humans and agents;
-#      symlinked + rc-line guarded so re-running never duplicates).
-#   2. /usr/local/bin (system-wide) — attempted only when passwordless sudo
-#      is available; never a hard failure when it is not.
-BIN_DIR="$HOME/.local/bin"
-RC_FILE="$HOME/.bashrc"; [ -n "${ZSH_VERSION:-}" ] && RC_FILE="$HOME/.zshrc"
-if mkdir -p "$BIN_DIR" 2>/dev/null; then
-  ln -sfn "$GENOME_BIN" "$BIN_DIR/genome"
-  log "genome on PATH: $BIN_DIR/genome"
-  register_install bin "$BIN_DIR/genome"
-  if [ -f "$RC_FILE" ] && ! grep -qsE '(^|:)\$?HOME/\.local/bin(["'"'"']?)' "$RC_FILE"; then
-    printf '\n# added by project-genome installer: ~/.local/bin on PATH\nexport PATH="$HOME/.local/bin:$PATH"\n' >> "$RC_FILE"
-    log "PATH line appended to $RC_FILE (takes effect in new shells)"
+# ── [SECTION: install] the uv → pipx → pip chain ───────────────────────────
+# Each rung degrades gracefully. uv is the best rung (a self-contained tool
+# install, no venv juggling); pipx is the classic; pip --user is the floor.
+# Nothing is installed into a system Python: PEP 668 makes that an error on
+# Debian/Ubuntu, and it wrecks distro package management.
+installed_with=""
+if [ "$FROM_GITHUB" = "1" ]; then
+  command -v git >/dev/null 2>&1 || die "--from-github needs git — install git, or drop the flag to install from PyPI"
+  command -v curl >/dev/null 2>&1 || die "--from-github needs curl to fetch the release archive"
+  info "installing from the Git repository (unreleased build)"
+  if command -v uv >/dev/null 2>&1; then
+    uv tool install --force --from "git+$REPO" "$PKG" && installed_with="uv (from git)"
+  elif command -v pipx >/dev/null 2>&1; then
+    pipx install --force "git+$REPO" && installed_with="pipx (from git)"
+  else
+    python3 -m pip install --user --force-reinstall "git+$REPO" && installed_with="pip (from git)"
   fi
+elif command -v uv >/dev/null 2>&1; then
+  info "installing with uv"
+  if uv tool install --force "$PKG" 2>/dev/null; then installed_with="uv"; else
+    warn "uv tool install failed — trying pipx"
+    command -v pipx >/dev/null 2>&1 || die "uv could not install $PKG and pipx is not installed. Install pipx (pipx install pipx) or uv (curl -LsSf https://astral.sh/uv/install.sh | sh), then re-run."
+    pipx install --force "$PKG" && installed_with="pipx"
+  fi
+elif command -v pipx >/dev/null 2>&1; then
+  info "installing with pipx"
+  pipx install --force "$PKG" && installed_with="pipx"
 else
-  log "could not create $BIN_DIR — use the export line below instead"
+  info "installing with pip --user"
+  python3 -m pip install --user --upgrade "$PKG" && installed_with="pip --user"
 fi
-# System-wide attempt (best-effort, non-fatal): passwordless sudo only.
-if command -v genome >/dev/null 2>&1; then
-  : # already reachable — nothing to add
-elif sudo -n true >/dev/null 2>&1; then
-  sudo -n ln -sfn "$(readlink -f "$GENOME_BIN")" /usr/local/bin/genome 2>/dev/null \
-    && { log "genome on PATH system-wide: /usr/local/bin/genome"; register_install bin /usr/local/bin/genome; } \
-    || log "~/.local/bin stands; /usr/local/bin skipped (sudo refused)"
+[ -n "$installed_with" ] || die "the install did not report a successful method — see the errors above"
+info "installed via $installed_with"
+
+# ── [SECTION: path] idempotent PATH injection ───────────────────────────────
+# uv and pipx both land in ~/.local/bin. PATH edits only prove themselves in a
+# NEW shell, so the rc file is the real deliverable — and it must be written
+# once: re-running this installer must not append a second copy.
+ensure_path() {
+  local dir="$1"
+  mkdir -p "$dir" 2>/dev/null || return 1
+  case ":$PATH:" in *":$dir:"*) return 0 ;; esac
+  local rc="$HOME/.bashrc"
+  [ -f "$HOME/.zshrc" ] && rc="$HOME/.zshrc"
+  if ! grep -qs "export PATH=\"$dir:\$PATH\"" "$rc" 2>/dev/null; then
+    printf '\n# added by project-genome installer: %s on PATH\nexport PATH="%s:$PATH"\n' "$dir" "$dir" >> "$rc"
+    info "PATH line appended to $rc (takes effect in new shells)"
+  fi
+  export PATH="$dir:$PATH"
+}
+ensure_path "$BIN_DIR" || warn "could not create $BIN_DIR — use the export line below"
+
+# ── [SECTION: verify] the promise this installer makes ──────────────────────
+# `genome` must resolve and run. On a PATH that was only fixed in the rc file,
+# THIS shell may not see it yet — say so plainly instead of claiming success.
+GENOME_BIN=""
+for cand in "$BIN_DIR/genome" "$HOME/.local/bin/genome"; do
+  [ -x "$cand" ] && { GENOME_BIN="$cand"; break; }
+done
+if [ -n "$GENOME_BIN" ]; then
+  export PATH="$BIN_DIR:$PATH"
+  VERSION_OUT="$("$GENOME_BIN" --version 2>&1 || true)"
+  case "$VERSION_OUT" in
+    genome*) info "verified: $VERSION_OUT ($GENOME_BIN)" ;;
+    *) die "the installed CLI did not run: $VERSION_OUT" ;;
+  esac
+elif command -v "$NAME" >/dev/null 2>&1; then
+  info "verified: $(command -v "$NAME")"
+else
+  die "$NAME is not on PATH — add this to your shell profile and re-run: export PATH=\"$BIN_DIR:\$PATH\""
 fi
-# Verify the promise this installer makes: `genome` resolves.
-command -v genome >/dev/null 2>&1 \
-  || log "WARN: genome not on PATH in THIS shell — new shells get it via $RC_FILE"
 
-# The registry summary: what this machine now tracks, and the one command
-# that re-checks it after any upgrade anywhere.
-log "install registry: $(python3 "$SRC_DIR/scripts/genome" installs list 2>/dev/null | grep -c 'version' || echo 0) install(s) recorded — future upgrades: re-run install.sh, then `genome installs verify`"
+# ── [SECTION: skill] the methodology bundle (optional, off by default) ──────
+# The package installs the CLI. The SKILL carries the methodology, the lint
+# rule reference and the adoption guide — an agent needs that too, so it is a
+# separate, explicit step rather than a surprise side effect of the CLI install.
+if [ "$SKIP_SKILL" = "0" ]; then
+  command -v git >/dev/null 2>&1 || die "--skill needs git to fetch the bundle (install git, or drop --skill)"
+  ROOTS=()
+  for d in "$HOME/.agents/skills" "$HOME/.claude/skills" "$HOME/.zcode/skills" "$HOME/.codex/skills"; do
+    [ -d "$d" ] && ROOTS+=("$d")
+  done
+  for d in ${EXTRA_DIRS+"${EXTRA_DIRS[@]}"}; do ROOTS+=("$d"); done
+  if [ "${#ROOTS[@]}" -eq 0 ]; then
+    ROOTS+=("$HOME/.agents/skills")
+    info "no harness skills directory found — using ${ROOTS[0]}"
+  fi
+  for root in "${ROOTS[@]}"; do
+    dest="$root/$TARGET_NAME"
+    mkdir -p "$root"
+    if [ -d "$dest/.git" ]; then
+      if git -C "$dest" fetch origin "$BRANCH" --quiet && git -C "$dest" reset --hard "origin/$BRANCH" --quiet; then
+        info "updated skill: $dest"
+      else
+        warn "could not update $dest — is another process holding it?"
+      fi
+    else
+      if git clone --depth 1 --branch "$BRANCH" "$REPO" "$dest" --quiet 2>/dev/null; then
+        info "installed skill: $dest"
+      else
+        warn "could not clone the skill into $dest"
+      fi
+    fi
+  done
+fi
 
+# ── [SECTION: summary] ──────────────────────────────────────────────────────
 echo ""
 echo "project-genome installed."
 echo ""
-echo "The genome CLI is on PATH — inside any project:"
+echo "  genome init --profile software   # scaffold a knowledge genome"
+echo "  genome wake                      # orient a fresh agent"
+echo "  genome lint                      # check the roles and their mutability"
 echo ""
-echo "  genome init --profile core    # or: records | research | ops | agents"
-echo "  genome wake                   # orient"
-echo ""
-if command -v npx >/dev/null 2>&1; then
-  echo "Agent harnesses using the skills registry can also install directly:"
-  echo ""
-  echo "  npx skills add ishan-parihar/project-genome --agent '*' --skill '*' -y"
-  echo ""
+if [ "$SKIP_SKILL" = "0" ]; then
+  echo "The skill bundle is installed too — agents pick up the methodology and references."
+else
+  echo "The CLI is installed. For the agent methodology + references, add --skill"
+  echo "(or: npx skills add ishan-parihar/project-genome --agent '*' --skill '*' -y)."
 fi
+echo ""
 
-# ── [SECTION: CTA] star + donate (delete flag: never delete) ──────────────
+# ── [SECTION: CTA] star + donate ────────────────────────────────────────────
 print_cta() {
   [ "${SKIP_CTA:-0}" = "1" ] && return 0
   echo "──────────────────────────────────────────────────────"

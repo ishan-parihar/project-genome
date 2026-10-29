@@ -164,8 +164,10 @@ def inventory(cfg: Cfg) -> list[str]:
                    f"{len(records(cfg, True))} retired in {cfg.rel(rec_archive(cfg))}")
     if worklog_numbered(cfg) and (wf := worklog_files(cfg)):
         out.append(f"worklog: {len(wf)} entries, latest {wf[-1].name}")
-    # a vendored copy drifts from the skill it came from; say so (never auto-update: the repo pins its tool)
-    skill = Path(os.environ.get("GENOME_SKILL", "~/.agents/skills/project-genome/scripts/genome")).expanduser()
+    # a vendored copy drifts from the skill it came from; say so (never auto-update: the repo pins its tool).
+    # An installed package has no separate skill copy: it IS the shipped one, so there
+    # is nothing to drift from and nothing to report.
+    skill = skill_copy()
     me = Path(__file__).resolve()
     if skill.is_file() and skill.resolve() != me and skill.read_bytes() != me.read_bytes():
         v = re.search(r'^VERSION = "([^"]+)"', read(skill), re.M)
