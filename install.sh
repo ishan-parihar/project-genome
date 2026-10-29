@@ -4,7 +4,7 @@
 #   curl -fsSL https://raw.githubusercontent.com/ishan-parihar/project-genome/main/install.sh | bash
 #
 # What it installs:
-#   1. the `genome` CLI, as a Python package (pip/uv/pipx) — the tool on any machine
+#   1. the `genome` CLI, as a Python package (uv / pipx / pip) — the tool on any machine
 #   2. optionally (--skill) the project-genome SKILL bundle into the agent harnesses
 #      you have — the methodology + references that accompany the CLI
 #
@@ -109,13 +109,18 @@ if [ "$FROM_GITHUB" = "1" ]; then
   fi
 elif command -v uv >/dev/null 2>&1; then
   info "installing with uv"
-  if uv tool install --force "$PKG" 2>/dev/null; then installed_with="uv"; else
-    warn "uv tool install failed — trying pipx"
-    command -v pipx >/dev/null 2>&1 || die "uv could not install $PKG and pipx is not installed. Install pipx (pipx install pipx) or uv (curl -LsSf https://astral.sh/uv/install.sh | sh), then re-run."
-    pipx install --force "$PKG" && installed_with="pipx"
-  fi
-  if [ "$installed_with" = "uv" ]; then
+  if uv tool install --force "$PKG" 2>/dev/null; then
+    installed_with="uv"
     INSTALL_BIN_DIR="$(uv tool dir --bin 2>/dev/null || echo "$BIN_DIR")"
+  else
+    # The package may simply not be on PyPI yet (a first publish is the operator's
+    # step). That is not a failure of the machine, so say what happened and fall
+    # through to the next rung rather than dying — and with --skill on, the bundle
+    # is an explicit request that must still be honoured.
+    warn "uv could not install $PKG (not on PyPI yet? trying the next rung)"
+    if command -v pipx >/dev/null 2>&1; then
+      pipx install --force "$PKG" && { installed_with="pipx"; INSTALL_BIN_DIR="$(pipx environment --value PIPX_BIN_DIR 2>/dev/null || echo "$BIN_DIR")"; }
+    fi
   fi
 elif command -v pipx >/dev/null 2>&1; then
   info "installing with pipx"
@@ -126,8 +131,21 @@ else
   python3 -m pip install --user --upgrade "$PKG" && installed_with="pip --user"
   INSTALL_BIN_DIR="$(python3 -c 'import sysconfig; print(sysconfig.get_path("scripts", scheme="posix_user"))' 2>/dev/null || echo "$BIN_DIR")"
 fi
-[ -n "$installed_with" ] || die "the install did not report a successful method — see the errors above"
-info "installed via $installed_with"
+# The CLI is the point of the script, but a --skill run has a second explicit
+# request. When the package cannot be installed (typically: not published yet) and
+# --skill is on, the bundle still gets installed and the CLI install is reported as
+# unmet rather than aborting the run.
+CLI_UNMET=0
+if [ -z "$installed_with" ]; then
+  if [ "$SKIP_SKILL" = "0" ]; then
+    warn "the CLI package could not be installed — installing the skill bundle anyway"
+    CLI_UNMET=1
+  else
+    die "the install did not report a successful method — see the errors above (the package may not be published yet: try --from-github)"
+  fi
+else
+  info "installed via $installed_with"
+fi
 
 # ── [SECTION: path] idempotent PATH injection ───────────────────────────────
 # uv and pipx both land in ~/.local/bin. PATH edits only prove themselves in a
@@ -162,17 +180,29 @@ if [ -z "$GENOME_BIN" ]; then
   done
 fi
 if [ -n "$GENOME_BIN" ]; then
-  export PATH="$(dirname "$GENOME_BIN"):$PATH"
+  # assign separately from the export: SC2155 — a failed substitution inside an
+  # export's command substitution is masked, and here it would hide a broken bin dir
+  BIN_DIR_FOUND="$(dirname "$GENOME_BIN")"
+  export PATH="$BIN_DIR_FOUND:$PATH"
   VERSION_OUT="$("$GENOME_BIN" --version 2>&1 || true)"
   case "$VERSION_OUT" in
     genome*) info "verified: $VERSION_OUT ($GENOME_BIN)" ;;
     *) die "the installed CLI did not run: $VERSION_OUT" ;;
   esac
+elif [ "$CLI_UNMET" = "1" ]; then
+  # nothing was installed to verify, and an existing genome on PATH is not this
+  # run's artifact: say so rather than printing a success it did not earn
+  warn "no installed CLI to verify — the bundle install stands on its own"
 elif command -v "$NAME" >/dev/null 2>&1; then
-  info "verified: $(command -v "$NAME")"
+  # a copy exists, but this run never installed it: not this installer's success
+  warn "the newly installed CLI was not found; a different copy is at $(command -v "$NAME") — re-run install.sh"
 else
   die "$NAME is not on PATH — add this to your shell profile and re-run: export PATH=\"$BIN_DIR:\$PATH\""
 fi
+
+# Only the verified binary registers. register_install calls $GENOME_BIN, so an
+# empty one would otherwise silently fall back to whatever genome is on PATH —
+# registering a copy this run did not install, and recording it as this run's.
 
 # ── [SECTION: registry] record this install in the machine manifest ─────────
 # The registry is what stops an upgrade from leaving stragglers behind: it
@@ -207,6 +237,18 @@ if [ "$SKIP_SKILL" = "0" ]; then
     dest="$root/$TARGET_NAME"
     mkdir -p "$root"
     if [ -d "$dest/.git" ]; then
+      # A checkout of this REPO. The update is a fetch+reset against origin/main, which
+      # is safe for the skill (its only local files are genome-owned) but DESTRUCTIVE
+      # inside a repo that vendors scripts/genome and has its own uncommitted work
+      # there — observed: a reset --hard silently discarded a working-tree change in
+      # operant's vendored copy. So refuse the reset when the repo carries a DIFFERENT
+      # skill checkout inside its own tree, and say what to run instead.
+      if [ -e "$dest/scripts/genome" ] && ! git -C "$dest" diff --quiet -- scripts/genome 2>/dev/null; then
+        warn "$dest has its own uncommitted scripts/genome — not resetting it"
+        warn "  inspect it with: git -C $dest diff -- scripts/genome"
+        warn "  upgrade that copy with: genome installs upgrade --apply (from inside $dest)"
+        continue
+      fi
       if git -C "$dest" fetch origin "$BRANCH" --quiet && git -C "$dest" reset --hard "origin/$BRANCH" --quiet; then
         info "updated skill: $dest"
       else
@@ -225,17 +267,25 @@ fi
 
 # ── [SECTION: summary] ──────────────────────────────────────────────────────
 echo ""
-echo "project-genome installed."
-echo ""
-echo "  genome init --profile software   # scaffold a knowledge genome"
-echo "  genome wake                      # orient a fresh agent"
-echo "  genome lint                      # check the roles and their mutability"
-echo ""
-if [ "$SKIP_SKILL" = "0" ]; then
-  echo "The skill bundle is installed too — agents pick up the methodology and references."
+if [ "$CLI_UNMET" = "1" ]; then
+  echo "The skill bundle is installed. The CLI package could NOT be installed."
+  echo ""
+  echo "  Usually this means $PKG is not on PyPI yet. Install the CLI with:"
+  echo "    curl -fsSL https://raw.githubusercontent.com/ishan-parihar/project-genome/main/install.sh | bash -s -- --from-github"
+  echo ""
 else
-  echo "The CLI is installed. For the agent methodology + references, add --skill"
-  echo "(or: npx skills add ishan-parihar/project-genome --agent '*' --skill '*' -y)."
+  echo "project-genome installed."
+  echo ""
+  echo "  genome init --profile software   # scaffold a knowledge genome"
+  echo "  genome wake                      # orient a fresh agent"
+  echo "  genome lint                      # check the roles and their mutability"
+  echo ""
+  if [ "$SKIP_SKILL" = "0" ]; then
+    echo "The skill bundle is installed too — agents pick up the methodology and references."
+  else
+    echo "The CLI is installed. For the agent methodology + references, add --skill"
+    echo "(or: npx skills add ishan-parihar/project-genome --agent '*' --skill '*' -y)."
+  fi
 fi
 echo ""
 
