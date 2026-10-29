@@ -6,76 +6,72 @@ project-genome prevents this with **documentation roles that have owners and mut
 
 ```console
 $ genome wake
-# genome wake — my-projects @ main e6575e4 (1 dirty) [agents, core, records]
+# genome wake — operant @ main 2b5bde1a (14 dirty) [agents, core, ops, records]
 
-## STATE  docs/handoff/STATE.md:6-26
-## State — 2026-10-23, after the identity surface audit and its integration plan
+## STATE  docs/handoff/STATE.md:6-53
+## Where the project stands
+  ...
 
-- **The identity surface is mapped, and it is not as fragmented as feared**: the audit
-  measures 14 loci across three pools and finds the canonical store sound —
-  aspect files, single-writer CLI, real pooling symlinks — so the migration
-  must not re-fragment it. The fragmentation is narrower and named.
+## HEALTH  doctor 3 finding(s) · lint 1 error(s), 4 warning(s)
+- stale state: docs/handoff/STATE.md names 5402846c, HEAD is 2b5bde1a (6 non-documentation path(s) changed since)
+- append-only violation: 1 line(s) removed from docs/kb/feed.md in the last 10 commits
+
+Next: `genome ask "<question>"` → the owning section; read only that range.
 ```
 
-- **One file, zero dependencies.** The CLI is `scripts/genome`, Python ≥ 3.11, stdlib only. No install step beyond having the file.
-- **Self-checking.** `scripts/test_genome.py` runs 37 independent cases against a scratch copy; it never writes your project.
+![genome wake on a live project](assets/genome-wake.png)
+
+- **One file, zero dependencies.** The CLI is stdlib only, Python ≥ 3.11. Nothing to resolve, nothing to compile.
+- **Self-checking.** `scripts/test_genome.py` runs 38 independent cases against a scratch copy; it never writes your project.
 - **Scales by module.** A small app needs `core`. A multi-year R&D program turns on records, research evidence, ops gates, and multi-agent boards — same CLI.
 - **Federates.** Per-project genomes exchange typed cards (`federate`), so a portfolio of repos answers questions as one (`ask --all`).
 
 ## Install
 
-**As an agent skill** (the canonical path — the skill carries the methodology, the CLI, and the references):
-
 ```bash
-npx skills add ishan-parihar/project-genome --agent '*' --skill '*' -y
+uv tool install project-genome        # recommended: self-contained, no venv
 ```
 
-**As a plain checkout** (nothing else needed — the CLI has no dependencies):
+```bash
+pipx install project-genome            # or: pip install --user project-genome
+```
+
+Or, without a package manager:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/ishan-parihar/project-genome/main/install.sh | bash
 ```
 
-or manually:
+The script tries `uv`, then `pipx`, then `pip --user`, and never installs into a system Python. On Windows: `irm https://raw.githubusercontent.com/ishan-parihar/project-genome/main/install.ps1 | iex`.
+
+**As an agent skill** — the methodology, the CLI, and the references, installed into the harnesses you have:
 
 ```bash
-git clone https://github.com/ishan-parihar/project-genome.git ~/.agents/skills/project-genome
-python3 ~/.agents/skills/project-genome/scripts/test_genome.py   # 37/37 must pass
+npx skills add ishan-parihar/project-genome --agent '*' --skill '*' -y
 ```
 
-Point your harness at the CLI once: `GENOME=~/.agents/skills/project-genome/scripts/genome`.
-
-**The install registry.** The installer records every install it creates in
-`~/.config/genome/installs.json` (skills roots + PATH bins; override with
-`GENOME_INSTALLS`). After upgrading anywhere — re-run install.sh — one command
-proves the machine is consistent:
-
-```bash
-genome installs verify     # MISSING a path, or STALE vs the recorded VERSION -> exit 2
-genome installs scan        # any install the installer never registered
-genome installs list        # what this machine tracks, with live versions
-```
-
-Vendored copies inside adopting repos are informational (`installs register
-vendored <path>`); they upgrade with `genome upgrade --apply` in that repo.
+The CLI and the skill are separate deliverables. The package installs the tool; the skill teaches an agent how to drive it.
 
 ### What it touches
 
-- Writes only inside your project (`genome.toml`, or legacy `kb.toml`, read unchanged, plus the directories your module set declares), with two exceptions that write to the HOME, never to repos: the install registry (`~/.config/genome/installs.json`, via install.sh or `genome installs register`) and the federation card cache (`~/.cache/genome/cards`).
-- No telemetry, no network at run time. `genome upgrade` is the only command that may fetch, and only to compare the vendored copy's hash against `scripts/releases.txt`.
-- Reversibility: delete `genome.toml` and the genome-owned directories. Your documents are plain markdown + YAML throughout.
+| Concern | Answer |
+|---|---|
+| Files written | Inside your project only: `genome.toml` and the directories your module set declares. Two exceptions, both under `$HOME`: the install registry (`~/.config/genome/installs.json`) and the federation card cache (`~/.cache/genome/cards`). |
+| Network | None at run time. `genome upgrade` may fetch, only to compare a vendored copy's hash against the release ledger. |
+| Permissions | No root, no system paths. `uv`/`pipx` install into `~/.local/bin`; the installer adds that to your shell profile once (idempotent — re-running never duplicates the line). |
+| Uninstall | `uv tool uninstall project-genome` (or `pipx uninstall project-genome`). Inside a project, delete `genome.toml` and the genome-owned directories — your documents are plain markdown throughout. |
 
 ## Getting started
 
 ```bash
 cd your-project
-$GENOME init --profile core     # or: records | research | ops | agents (composable)
-$GENOME wake                    # orient: state, next reads, open asks
-$GENOME ask "who owns the pricing figure?"   # section-level retrieval
-$GENOME log "shipped the parser"             # close: worklog, one per unit of work
+genome init --profile software     # or: research | team | full
+genome wake                        # orient: state, next reads, open asks
+genome ask "who owns the pricing figure?"   # section-level retrieval
+genome log "shipped the parser"             # close: worklog, one per unit of work
 ```
 
-Profiles: `core` (always) — state, entry, register, worklog, runbook, operator Q&A, `wake`/`ask`/`close`/`doctor`. Add modules when the project's complexity earns them:
+`software` turns on `core` + `records`. Add modules when the project's complexity earns them:
 
 | Module | Turn it on when | Adds |
 |---|---|---|
@@ -115,6 +111,24 @@ Three commands carry the daily loop:
 | `close` | *what did this session change?* | worklog entry, register updates, the state doc refreshed — the next `wake` sees it |
 
 `doctor` is the audit: ownership completeness, dead links, mutability violations, undated figures, tracked bulk, secret-scan on diffs. It exits non-zero when something rotting would otherwise exit silently.
+
+## One machine, many genomes
+
+A genome is per-project, but the tool is per-machine. The install registry (`~/.config/genome/installs.json`) names every copy of genome on the box — the skills roots, the PATH bin, the copies vendored inside adopting repos — and every knowledge base it can reach:
+
+```bash
+genome installs list                  # what this machine tracks, with live versions
+genome installs verify                # a path vanished, or a version changed -> exit 2
+genome installs verify --against-shipped   # which copies are behind the shipped release
+genome installs scan --roots ~/code   # activated genomes the manifest never registered
+genome installs upgrade               # dispatch an update to every copy behind (dry run)
+genome kb list                        # the knowledge bases, reachable from any directory
+genome kb lint --all                  # lint every KB, each with its own rules
+```
+
+`genome kb show operant` reaches a project from anywhere; `genome kb lint --all` runs each project's own vendored CLI so the check is that project's own rules, and reports a KB with no CLI as skipped rather than clean.
+
+A KB with no local CLI is a legitimate shape — a meta-root, or a nested project that defers to its parent — so the registry tracks it as a knowledge base with no version to compare, not as a broken install.
 
 ## Modules in depth
 
@@ -158,12 +172,15 @@ Per-workflow claim boards with flock-guarded rows (two agents cannot hold the sa
 ```
 src/NN_*.py        the source modules (edit here)
 scripts/build.py   concatenates src/ into scripts/genome byte for byte
-scripts/test_genome.py   the self-check: 37 independent cases, scratch-copy isolated
-scripts/probe-outline-languages.py   the outline derivation across every language in the fleet
+scripts/genome     the built artifact — the same file the package ships and repos vendor
+scripts/test_genome.py   the self-check: 38 independent cases, scratch-copy isolated
+project_genome/    the thin package wrapper (pyproject.toml builds a wheel from it)
 evals/             graded evals + fixtures
 ```
 
 Edit `src/`, rebuild with `python3 scripts/build.py`, verify with `python3 scripts/test_genome.py`. The version ledger in `scripts/releases.txt` tells `genome upgrade` a hand-patched vendored copy from a release.
+
+Build the package with `uv build`; the wheel ships the same built file the repos vendor, so a pip-installed genome and a vendored genome are the same bytes.
 
 ## License
 

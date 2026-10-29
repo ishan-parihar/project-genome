@@ -87,17 +87,25 @@ info "python3 $py_ver ok"
 # install, no venv juggling); pipx is the classic; pip --user is the floor.
 # Nothing is installed into a system Python: PEP 668 makes that an error on
 # Debian/Ubuntu, and it wrecks distro package management.
+#
+# The bin directory each rung lands in is RECORDED, because the verify step must
+# check the binary this run installed — not whatever genome happens to sit at
+# ~/.local/bin/genome already (observed: the installer verified a stale -20
+# symlink while the freshly installed -21 sat in the uv tool dir).
 installed_with=""
+INSTALL_BIN_DIR=""
 if [ "$FROM_GITHUB" = "1" ]; then
   command -v git >/dev/null 2>&1 || die "--from-github needs git — install git, or drop the flag to install from PyPI"
-  command -v curl >/dev/null 2>&1 || die "--from-github needs curl to fetch the release archive"
   info "installing from the Git repository (unreleased build)"
   if command -v uv >/dev/null 2>&1; then
     uv tool install --force --from "git+$REPO" "$PKG" && installed_with="uv (from git)"
+    INSTALL_BIN_DIR="$(uv tool dir --bin 2>/dev/null || echo "$BIN_DIR")"
   elif command -v pipx >/dev/null 2>&1; then
     pipx install --force "git+$REPO" && installed_with="pipx (from git)"
+    INSTALL_BIN_DIR="$(pipx environment --value PIPX_BIN_DIR 2>/dev/null || echo "$BIN_DIR")"
   else
     python3 -m pip install --user --force-reinstall "git+$REPO" && installed_with="pip (from git)"
+    INSTALL_BIN_DIR="$("$HOME/.local/bin/python3" -c 'import sysconfig; print(sysconfig.get_path("scripts", scheme="posix_user"))' 2>/dev/null || echo "$BIN_DIR")"
   fi
 elif command -v uv >/dev/null 2>&1; then
   info "installing with uv"
@@ -106,12 +114,17 @@ elif command -v uv >/dev/null 2>&1; then
     command -v pipx >/dev/null 2>&1 || die "uv could not install $PKG and pipx is not installed. Install pipx (pipx install pipx) or uv (curl -LsSf https://astral.sh/uv/install.sh | sh), then re-run."
     pipx install --force "$PKG" && installed_with="pipx"
   fi
+  if [ "$installed_with" = "uv" ]; then
+    INSTALL_BIN_DIR="$(uv tool dir --bin 2>/dev/null || echo "$BIN_DIR")"
+  fi
 elif command -v pipx >/dev/null 2>&1; then
   info "installing with pipx"
   pipx install --force "$PKG" && installed_with="pipx"
+  INSTALL_BIN_DIR="$(pipx environment --value PIPX_BIN_DIR 2>/dev/null || echo "$BIN_DIR")"
 else
   info "installing with pip --user"
   python3 -m pip install --user --upgrade "$PKG" && installed_with="pip --user"
+  INSTALL_BIN_DIR="$(python3 -c 'import sysconfig; print(sysconfig.get_path("scripts", scheme="posix_user"))' 2>/dev/null || echo "$BIN_DIR")"
 fi
 [ -n "$installed_with" ] || die "the install did not report a successful method — see the errors above"
 info "installed via $installed_with"
@@ -135,14 +148,21 @@ ensure_path() {
 ensure_path "$BIN_DIR" || warn "could not create $BIN_DIR — use the export line below"
 
 # ── [SECTION: verify] the promise this installer makes ──────────────────────
-# `genome` must resolve and run. On a PATH that was only fixed in the rc file,
-# THIS shell may not see it yet — say so plainly instead of claiming success.
+# `genome` must resolve and run. THE BINARY THIS RUN INSTALLED is what gets
+# checked: on a machine that already had a genome on PATH (the skills-root
+# symlink), verifying that one would report success for a stale build while the
+# freshly installed copy sat unverified beside it.
 GENOME_BIN=""
-for cand in "$BIN_DIR/genome" "$HOME/.local/bin/genome"; do
-  [ -x "$cand" ] && { GENOME_BIN="$cand"; break; }
-done
+if [ -n "$INSTALL_BIN_DIR" ] && [ -x "$INSTALL_BIN_DIR/$NAME" ]; then
+  GENOME_BIN="$INSTALL_BIN_DIR/$NAME"
+fi
+if [ -z "$GENOME_BIN" ]; then
+  for cand in "$BIN_DIR/$NAME" "$HOME/.local/bin/$NAME"; do
+    [ -x "$cand" ] && { GENOME_BIN="$cand"; break; }
+  done
+fi
 if [ -n "$GENOME_BIN" ]; then
-  export PATH="$BIN_DIR:$PATH"
+  export PATH="$(dirname "$GENOME_BIN"):$PATH"
   VERSION_OUT="$("$GENOME_BIN" --version 2>&1 || true)"
   case "$VERSION_OUT" in
     genome*) info "verified: $VERSION_OUT ($GENOME_BIN)" ;;
@@ -153,6 +173,20 @@ elif command -v "$NAME" >/dev/null 2>&1; then
 else
   die "$NAME is not on PATH — add this to your shell profile and re-run: export PATH=\"$BIN_DIR:\$PATH\""
 fi
+
+# ── [SECTION: registry] record this install in the machine manifest ─────────
+# The registry is what stops an upgrade from leaving stragglers behind: it
+# names every copy, `genome installs verify` reports drift, and `genome installs
+# scan` finds what the installer missed. A pip/uv install is exactly the kind
+# of copy that otherwise goes untracked.
+register_install() {  # register_install <kind> <path> [note]
+  if "$GENOME_BIN" installs register "$1" "$2" --note "${3:-via install.sh}" >/dev/null 2>&1; then
+    info "registered: $2"
+  else
+    warn "could not register $2 in the installs manifest — `genome installs scan` will find it"
+  fi
+}
+[ -n "$GENOME_BIN" ] && register_install bin "$GENOME_BIN" "via install.sh ($installed_with)"
 
 # ── [SECTION: skill] the methodology bundle (optional, off by default) ──────
 # The package installs the CLI. The SKILL carries the methodology, the lint
@@ -185,6 +219,7 @@ if [ "$SKIP_SKILL" = "0" ]; then
         warn "could not clone the skill into $dest"
       fi
     fi
+    [ -n "$GENOME_BIN" ] && register_install skill "$dest" "via install.sh --skill"
   done
 fi
 
