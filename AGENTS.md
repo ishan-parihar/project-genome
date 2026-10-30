@@ -43,7 +43,9 @@ blueprints/*.toml     5 ready-made KB shapes, embedded into the build
 evals/                16 graded scenarios + the grader; how the skill is tested end to end
 project_genome/       the thin package wrapper: `python -m project_genome`, the console
                       script, and the runpy shim that keeps __file__ honest
-install.sh / .ps1     the two installers (same chain: uv tool, pipx, pip, then --skill)
+install.sh / .ps1     the two installers (same chain: uv tool, pipx, pip, then
+                      --skill: one canonical copy at ~/.agents/skills + a link per
+                      harness root + a .skill-lock.json entry)
 docs/PUBLISHING.md    the PyPI release path (the operator's credential, the operator's step)
 ```
 

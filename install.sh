@@ -8,12 +8,20 @@
 #   2. optionally (--skill) the project-genome SKILL bundle into the agent harnesses
 #      you have — the methodology + references that accompany the CLI
 #
+# The skill takes ONE real copy at the canonical root (~/.agents/skills, the only
+# root a skills-backup push covers) and symlinks every other detected root at it —
+# the same shape `npx skills add -g` writes, so a machine that has both paths holds
+# one copy and N links rather than N copies. It also writes the project-genome entry
+# into ~/.agents/.skill-lock.json, so `npx skills update` refreshes THIS copy instead
+# of installing a second one beside it.
+#
 # Flags:
 #   --skill        also install the skill bundle into every detected harness
 #   --dir <path>   extra skills root (repeatable) for --skill
 #   --from-github  install the CLI from the Git repo instead of PyPI (unreleased builds)
 #   --no-cta       skip the star/donate epilogue (also: SKIP_CTA=1)
 #   --force-root   allow running as root (installs into $HOME of root)
+#   --copy-skill   copy the skill into every root instead of linking one canonical copy
 
 set -euo pipefail
 IFS=$'\n\t'
@@ -24,6 +32,18 @@ REPO="https://github.com/ishan-parihar/project-genome.git"
 BRANCH="main"
 TARGET_NAME="project-genome"
 BIN_DIR="$HOME/.local/bin"
+# The canonical skills root. ONE real copy of the skill lives here, because this is
+# the root a skills backup covers: ~/.agents is the only skills root on this machine's
+# class that is a git repo pushing to a remote (~/.claude, ~/.zcode, ~/.codex,
+# ~/.codegpt and opencode's ~/.config/opencode/skills are not), so a skill that lives
+# only under them has no second copy anywhere. This is also the root `npx skills add
+# -g` writes, which is why linking from it is interoperable rather than merely tidy.
+SKILL_CANON_ROOT="$HOME/.agents/skills"
+# The lock file, MEASURED 2026-10-30 rather than assumed: it sits at ~/.agents/
+# .skill-lock.json — one level ABOVE the skills root — and that is the file the
+# skills-backup service stages. Writing it inside skills/ (which an earlier draft
+# of this change did) puts the entry where no CLI ever looks.
+SKILL_LOCK="$HOME/.agents/.skill-lock.json"
 # Where this install puts things that are not on a tool's own PATH: the isolated
 # venv the pip rung falls back to on an externally-managed Python, and its bin.
 # Defaults under XDG data so a read-only or unusual HOME cannot break the install.
@@ -41,16 +61,18 @@ die()  { err "$*"; printf '      fix it, then re-run this installer.\n' >&2; exi
 # ── [SECTION: flags] ─────────────────────────────────────────────────────────
 SKIP_SKILL=1
 FROM_GITHUB=0
+COPY_SKILL=0
 EXTRA_DIRS=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --skill)       SKIP_SKILL=0; shift ;;
     --dir)         EXTRA_DIRS+=("$2"); shift 2 ;;
+    --copy-skill)  COPY_SKILL=1; shift ;;
     --from-github) FROM_GITHUB=1; shift ;;
     --no-cta)      SKIP_CTA=1; shift ;;
     --force-root)  FORCE_ROOT=1; shift ;;
-    --help|-h)     sed -n '2,16p' "$0"; exit 0 ;;
-    *) die "Unknown option: $1 (supported: --skill, --dir <path>, --from-github, --no-cta, --force-root)" ;;
+    --help|-h)     sed -n '2,30p' "$0"; exit 0 ;;
+    *) die "Unknown option: $1 (supported: --skill, --dir <path>, --copy-skill, --from-github, --no-cta, --force-root)" ;;
   esac
 done
 
@@ -309,50 +331,189 @@ register_install() {  # register_install <kind> <path> [note]
 }
 [ -n "$GENOME_BIN" ] && register_install bin "$GENOME_BIN" "via install.sh ($installed_with)"
 
+# The .skill-lock.json the npx `skills` CLI reads and writes. Without this entry the
+# two installers do not know about each other: `npx skills add` installs a SECOND copy
+# beside ours, and `npx skills update` never refreshes this one. (Measured 2026-10-30:
+# a machine holding 153 skills has 23 in its lock file, and project-genome is one of the
+# 130 the lock does not name — so every one of them is invisible to update.)
+# The lock file lives at ~/.agents/.skill-lock.json — one level ABOVE the skills
+# root — which is where the skills-backup service stages it, so an entry written
+# here survives a disk failure.
+skills_lock_entry() {  # skills_lock_entry <canonical skill path>
+  local canon="$1"
+  # MEASURED 2026-10-30, not assumed: the real lock file is
+  # ~/.agents/.skill-lock.json — one directory ABOVE the skills root, and it is
+  # that file the backup tracks (~/.local/state/skills/.skill-lock.json is a
+  # second, older copy with the same schema). Writing it inside skills/ put the
+  # entry where no CLI ever looks, which is the same defect it fixes.
+  local lock="$SKILL_LOCK"
+  [ -f "$canon/SKILL.md" ] || return 0
+  command -v python3 >/dev/null 2>&1 || { warn "no python3 — skipped the .skill-lock.json entry"; return 0; }
+  python3 - "$canon" "$lock" "$REPO" <<'PY' || warn "could not write the .skill-lock.json entry"
+import hashlib, json, os, sys
+from datetime import datetime, timezone
+canon, lock, repo = sys.argv[1], sys.argv[2], sys.argv[3]
+name = os.path.basename(canon)
+# A deterministic fingerprint over the skill's own files, EXCLUDING .git and
+# .variable paths. HONEST LIMIT, stated rather than papered over: this is NOT the
+# npx CLI's own `skillFolderHash` algorithm. Measured 2026-10-30 by re-deriving a
+# real entry's hash over its installed folder (recorded 86b6f36…, this scheme
+# c3c8fba…) — it does not match. So `npx skills update` will see this entry as
+# carrying a foreign hash and will re-fetch on its first pass, which is the safe
+# direction: it refreshes our canonical copy from origin/main rather than
+# concluding the copy is current and skipping it. The entry exists so the CLI
+# KNOWS this copy and its source, which is the part it cannot otherwise learn.
+# The alternative (writing no entry) leaves the copy invisible to update forever.
+h = hashlib.sha1()
+for root, dirs, files in os.walk(canon):
+    dirs[:] = sorted(d for d in dirs if d not in (".git", "__pycache__"))
+    for f in sorted(files):
+        if f.endswith((".pyc", ".genome-tmp")) or ".genome-tmp." in f:
+            continue
+        p = os.path.join(root, f)
+        h.update(os.path.relpath(p, canon).encode())
+        with open(p, "rb") as fh:
+            h.update(fh.read())
+now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+entry = {"source": "ishan-parihar/project-genome", "sourceType": "github",
+         "sourceUrl": repo, "skillPath": "SKILL.md",
+         "skillFolderHash": h.hexdigest(), "installedAt": now, "updatedAt": now}
+try:
+    data = json.load(open(lock)) if os.path.exists(lock) else {}
+except ValueError:
+    data = {}
+data.setdefault("version", 3)
+data.setdefault("skills", {})
+prior = data["skills"].get(name)
+data["skills"][name] = entry if prior is None else {**prior, **entry}
+os.makedirs(os.path.dirname(lock), exist_ok=True)
+with open(lock, "w") as f:
+    json.dump(data, f, indent=2)
+    f.write("\n")
+print("skill-lock: %s %s" % (name, "added" if prior is None else "refreshed"))
+PY
+}
+
 # ── [SECTION: skill] the methodology bundle (optional, off by default) ──────
 # The package installs the CLI. The SKILL carries the methodology, the lint
 # rule reference and the adoption guide — an agent needs that too, so it is a
 # separate, explicit step rather than a surprise side effect of the CLI install.
 if [ "$SKIP_SKILL" = "0" ]; then
   ROOTS=()
-  for d in "$HOME/.agents/skills" "$HOME/.claude/skills" "$HOME/.zcode/skills" "$HOME/.codex/skills"; do
-    [ -d "$d" ] && ROOTS+=("$d")
+  # Every harness root that exists. The list is wider than the four roots this
+  # installer used to probe (measured 2026-10-30: .codegpt and opencode also hold
+  # real skills on this machine, and .claude/skills/browser-automation is already a
+  # symlink into ~/.codegpt, which proves a harness reads it). A root that does not
+  # exist yet is created only for the canonical one; for the others a link at a
+  # path a harness has not created is harmless, so they are all offered.
+  for d in "$SKILL_CANON_ROOT" "$HOME/.claude/skills" "$HOME/.zcode/skills" \
+           "$HOME/.codex/skills" "$HOME/.codegpt/skills" \
+           "${XDG_CONFIG_HOME:-$HOME/.config}/opencode/skills"; do
+    if [ -d "$d" ] || [ "$d" = "$SKILL_CANON_ROOT" ]; then ROOTS+=("$d"); fi
   done
-  for d in ${EXTRA_DIRS+"${EXTRA_DIRS[@]}"}; do ROOTS+=("$d"); done
+  # Skip an empty element: `--dir` with a missing value, or an empty --dir="",
+  # otherwise pushes "" into ROOTS and the loop below tries `mkdir -p ""`, which
+  # fails with "could not create" on every run. Measured in the sandbox test on
+  # 2026-10-30 (an empty array with the `${VAR+...}` guard still yields one empty
+  # word, so the guard itself is not enough).
+  for d in ${EXTRA_DIRS+"${EXTRA_DIRS[@]}"}; do [ -n "$d" ] && ROOTS+=("$d"); done
   if [ "${#ROOTS[@]}" -eq 0 ]; then
-    ROOTS+=("$HOME/.agents/skills")
+    ROOTS+=("$SKILL_CANON_ROOT")
     info "no harness skills directory found — using ${ROOTS[0]}"
   fi
+  # The canonical root holds the ONE real copy; every other root gets a link at it.
+  # This is the shape `npx skills add -g` writes, so a machine that has used both
+  # installers converges on one copy instead of accumulating four.
+  CANON_DEST="$SKILL_CANON_ROOT/$TARGET_NAME"
+  mkdir -p "$SKILL_CANON_ROOT"
+  if [ -d "$CANON_DEST/.git" ]; then
+    if [ -e "$CANON_DEST/scripts/genome" ] && ! git -C "$CANON_DEST" diff --quiet -- scripts/genome 2>/dev/null; then
+      warn "$CANON_DEST has its own uncommitted scripts/genome — not resetting it"
+      warn "  inspect it with: git -C $CANON_DEST diff -- scripts/genome"
+      warn "  upgrade that copy with: genome installs upgrade --apply (from inside $CANON_DEST)"
+    elif git -C "$CANON_DEST" fetch origin "$BRANCH" --quiet && git -C "$CANON_DEST" reset --hard "origin/$BRANCH" --quiet; then
+      info "updated skill: $CANON_DEST"
+    else
+      warn "could not update $CANON_DEST — is another process holding it?"
+    fi
+  elif [ -L "$CANON_DEST" ]; then
+    warn "$CANON_DEST is a symlink, not a clone — replacing it with a real copy"
+    rm -f "$CANON_DEST"
+    if git clone --depth 1 --branch "$BRANCH" "$REPO" "$CANON_DEST" --quiet 2>/dev/null; then
+      info "installed skill: $CANON_DEST"
+    else
+      warn "could not clone the skill into $CANON_DEST"
+    fi
+  elif git clone --depth 1 --branch "$BRANCH" "$REPO" "$CANON_DEST" --quiet 2>/dev/null; then
+    info "installed skill: $CANON_DEST"
+  else
+    warn "could not clone the skill into $CANON_DEST"
+  fi
+  [ -n "$GENOME_BIN" ] && register_install skill "$CANON_DEST" "via install.sh --skill"
+
+  # The link target is computed, not hardcoded: relative depth differs by root
+  # (`.claude/skills` needs `../../`, `.config/opencode/skills` needs `../../../`),
+  # and the fixed `../.agents/skills/…` that a first draft wrote resolves to
+  # `~/.claude/.agents/skills/…` — a second broken link, caught by the sandbox test
+  # rather than by reading the code. Relative, not absolute, so a moved $HOME keeps
+  # the links working and so it matches what the npx convention writes.
+  link_target() {
+    python3 - "$1" "$SKILL_CANON_ROOT/$TARGET_NAME" <<'PYL'
+import os, sys
+print(os.path.relpath(sys.argv[2], os.path.dirname(sys.argv[1])))
+PYL
+  }
   for root in "${ROOTS[@]}"; do
     dest="$root/$TARGET_NAME"
-    mkdir -p "$root"
-    if [ -d "$dest/.git" ]; then
-      # A checkout of this REPO. The update is a fetch+reset against origin/main, which
-      # is safe for the skill (its only local files are genome-owned) but DESTRUCTIVE
-      # inside a repo that vendors scripts/genome and has its own uncommitted work
-      # there — observed: a reset --hard silently discarded a working-tree change in
-      # operant's vendored copy. So refuse the reset when the repo carries a DIFFERENT
-      # skill checkout inside its own tree, and say what to run instead.
-      if [ -e "$dest/scripts/genome" ] && ! git -C "$dest" diff --quiet -- scripts/genome 2>/dev/null; then
-        warn "$dest has its own uncommitted scripts/genome — not resetting it"
-        warn "  inspect it with: git -C $dest diff -- scripts/genome"
-        warn "  upgrade that copy with: genome installs upgrade --apply (from inside $dest)"
+    [ "$root" = "$SKILL_CANON_ROOT" ] && continue
+    if [ "$COPY_SKILL" = "1" ]; then
+      # The escape hatch for a harness that does not follow symlinks: a real copy
+      # in each root, which is what this installer used to do unconditionally.
+      mkdir -p "$root"
+      rm -rf "$dest"
+      if cp -R "$CANON_DEST" "$dest" 2>/dev/null; then
+        info "copied skill: $dest"
+        [ -n "$GENOME_BIN" ] && register_install skill "$dest" "via install.sh --skill --copy-skill"
+      else
+        warn "could not copy the skill into $dest"
+      fi
+      continue
+    fi
+    want="$(link_target "$dest")"
+    # Replace a previous clone (or a stale link) with a relative link at the
+    # canonical copy.
+    if [ -L "$dest" ]; then
+      tgt="$(readlink "$dest" || true)"
+      if [ "$tgt" = "$want" ]; then
+        info "skill already linked: $dest"
         continue
       fi
-      if git -C "$dest" fetch origin "$BRANCH" --quiet && git -C "$dest" reset --hard "origin/$BRANCH" --quiet; then
-        info "updated skill: $dest"
+      rm -f "$dest"
+    elif [ -d "$dest" ]; then
+      # A real copy from an earlier installer run. Verified identical before it is
+      # replaced, so a root that holds local work never loses it silently.
+      if diff -rq "$CANON_DEST" "$dest" >/dev/null 2>&1; then
+        rm -rf "$dest"
+        info "replaced identical skill copy with a link: $dest"
       else
-        warn "could not update $dest — is another process holding it?"
+        warn "$dest differs from the canonical copy — keeping it (compare: diff -rq $CANON_DEST $dest)"
+        [ -n "$GENOME_BIN" ] && register_install skill "$dest" "via install.sh --skill (kept: differs from canonical)"
+        continue
       fi
     else
-      if git clone --depth 1 --branch "$BRANCH" "$REPO" "$dest" --quiet 2>/dev/null; then
-        info "installed skill: $dest"
-      else
-        warn "could not clone the skill into $dest"
+      if ! mkdir -p "$root" 2>/dev/null; then
+        warn "could not create $root — skipping the link for this harness"
+        continue
       fi
     fi
-    [ -n "$GENOME_BIN" ] && register_install skill "$dest" "via install.sh --skill"
+    if ln -s "$want" "$dest" 2>/dev/null; then
+      info "linked skill: $dest -> $want"
+      register_install skill "$root" "via install.sh --skill (root links the canonical copy)"
+    else
+      warn "could not link the skill into $root"
+    fi
   done
+  skills_lock_entry "$CANON_DEST"
 fi
 
 # ── [SECTION: summary] ──────────────────────────────────────────────────────

@@ -51,10 +51,15 @@ Everything below is stdlib-only unless it says otherwise.
   `knowledge-bases/`, `genome/` is that KB's own layout (its `kinds/` subdir). A
   filesystem sweep for `-name genome` returns 11 directories that are not the CLI.
 - **`install.sh` and `install.ps1` must stay at parity.** `check_ps1.py` is the check.
-  A flag added to one is added to the other in the same change — five behaviours are now
-  on both (`--skill`, `--dir`, the git prerequisite check moved to request time, the
-  registry registration, and the vendored-copy guard that refuses to reset a
-  working-tree copy).
+  A flag added to one is added to the other in the same change — the behaviours now on
+  both are `--skill`, `--dir`, the git prerequisite check at request time, the registry
+  registration, the vendored-copy guard that refuses to reset a working-tree copy,
+  `--copy-skill`, the canonical-root link loop (`SKILL_CANON_ROOT` /
+  `$script:SkillCanonRoot`), the computed relative link target, and the
+  `.skill-lock.json` entry. `check_ps1.py` also teaches its brace matcher that
+  `[ordered]@{` opens a literal, not a block — install.ps1 builds the lock entry
+  through it, and without that the checker reports a mis-nested block on a file whose
+  real brace counts are fine.
 - **The build refuses a silent checksum rewrite.** If the bytes change and VERSION does
   not, `scripts/build.py` fails, because the fleet's 75 vendored copies are compared
   against that sha and a silent rewrite makes every one look hand-patched.

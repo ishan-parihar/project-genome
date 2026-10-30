@@ -82,8 +82,11 @@ genome --version
 One-liners to put in the README once live:
 
 ```bash
-# Linux / macOS
+# Linux / macOS — the CLI
 curl -fsSL https://raw.githubusercontent.com/ishan-parihar/project-genome/main/install.sh | bash
+
+# Linux / macOS — the CLI AND the agent skill, one command (cold-start safe)
+curl -fsSL https://raw.githubusercontent.com/ishan-parihar/project-genome/main/install.sh | bash -s -- --skill
 
 # Windows
 irm https://raw.githubusercontent.com/ishan-parihar/project-genome/main/install.ps1 | iex
@@ -93,6 +96,16 @@ The installer's default path is already PyPI (`uv tool install project-genome`),
 so publication flips it from "install from Git" to "install from the index"
 with no script change. `install.sh --from-github` stays as the path for
 unreleased builds.
+
+**What `--skill` writes** (measured 2026-10-30, in a sandbox, against the real
+section): one real copy at `~/.agents/skills/project-genome`, a relative symlink
+in each other harness root that exists, and one entry in
+`~/.agents/.skill-lock.json`. A second run is a no-op on all three; a real copy
+left by an older installer run in another root is replaced only after `diff -rq`
+proves it identical. The lock file sits at `~/.agents/.skill-lock.json` — one
+level **above** the skills root, which is where the npx CLI and this machine's
+skills-backup service both look (the first draft wrote it inside `skills/`, where
+nothing reads it).
 
 ## Versioning
 
@@ -115,9 +128,29 @@ rehearsal: `uv publish --publish-url https://test.pypi.org/legacy/ dist/*`).
 
 ## What a user gets on each path
 
-| Path | CLI | Methodology + references | Registry |
+**Measured 2026-10-30, corrected the same day.** The row below said `npx skills add`
+gives a "CLI: yes (inside the skill)". The first half is literally true and
+practically false: the skill directory *does* ship `scripts/genome`, and that file
+does run (`./scripts/genome --version` works from inside the skill root), but
+**nothing puts a `genome` command on PATH** and nothing registers it in
+`~/.config/genome/installs.json`. So every documented command inside
+`references/` — `genome lint`, `genome close`, `genome wake` — fails on a machine
+that installed the npx way, until the operator edits PATH or runs an installer for
+the CLI. The table records what the paths *actually* deliver.
+
+| Path | CLI on PATH | Methodology + references | Registry |
 |---|---|---|---|
 | `uv tool install` / `pipx` / `pip --user` | yes | no | registers the bin on install |
 | `install.sh` | yes (same chain) | `--skill` adds it | registers the bin on install |
-| `npx skills add` | yes (inside the skill) | yes | registers the skills root on install |
+| `install.sh --skill` | yes (same chain) | yes, as one canonical copy with one link per harness root | registers the bin, the skill root, and the `.skill-lock.json` entry |
+| `npx skills add` | no — a runnable `scripts/genome` lives inside the skill dir, but no PATH entry and no registry row | yes | registers the skills root on install |
 | a repo that vendors `scripts/genome` | yes, that repo's copy | via `references/` in that repo | `installs register vendored <path>` |
+
+**The cold-start asymmetry, stated plainly.** `install.sh` installed the CLI and
+skipped the skill by default; `npx skills add` installed the skill and skipped the
+CLI by default. Neither default was the product. `install.sh --skill` is now both,
+in one command (`curl -fsSL …/install.sh | bash -s -- --skill`), and its skill
+step writes the same on-disk shape `npx skills add -g` writes — one real copy at
+`~/.agents/skills/<name>`, a relative symlink per other harness root, one
+`.skill-lock.json` entry — so a machine that has used both paths converges instead
+of accumulating a clone per harness.

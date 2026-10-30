@@ -45,13 +45,23 @@ pipx install project-genome           # or: pip install --user project-genome
 
 To update later, re-run the installer — it is idempotent, so a second run updates the copy it put there without duplicating PATH lines or config. A repo that **vendors** `scripts/genome` updates that copy with `genome installs upgrade --apply` instead, because the CLI must never overwrite a repo's own vendored file.
 
-Flags the installer takes: `--skill` (also install the agent-skill bundle), `--dir <path>` (an extra skills root, repeatable), `--from-github` (force the Git path even after publication), `--no-cta`, `--force-root`.
+Flags the installer takes: `--skill` (also install the agent-skill bundle), `--dir <path>` (an extra skills root, repeatable), `--skill`'s sibling `--copy-skill` (a real copy in every root instead of one canonical copy with links), `--from-github` (force the Git path even after publication), `--no-cta`, `--force-root`.
 
-**As an agent skill** — the methodology, the CLI, and the references, installed into the harnesses you have:
+**The skill bundle** — what `--skill` puts on disk is the same shape `npx skills add -g` writes: **one real copy** at `~/.agents/skills/project-genome` (the canonical root, because it is the only skills root a skills backup covers), then a **relative symlink** in every other harness root that exists (`.claude/skills`, `.zcode/skills`, `.codex/skills`, `.codegpt/skills`, `~/.config/opencode/skills`), plus one entry in `~/.agents/.skill-lock.json` so `npx skills update` knows where this copy came from. A second installer run replaces none of them; a previous real copy in another root is replaced only after it is verified identical.
+
+**Install both, one line.** If you want the CLI *and* the skill in a single cold-start command, add `--skill`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ishan-parihar/project-genome/main/install.sh | bash -s -- --skill
+```
+
+The skill route is one command and gives you the skill, but it gives you **no CLI on PATH** and no entry in `~/.config/genome/installs.json`:
 
 ```bash
 npx skills add ishan-parihar/project-genome --agent '*' --skill '*' -y
 ```
+
+That asymmetry is the thing this installer removes: add `--skill` to the installer line and you get both from one invocation. If you already installed the npx way, running the installer with `--skill` links the existing copy instead of cloning a second one.
 
 The CLI and the skill are separate deliverables. The package installs the tool; the skill teaches an agent how to drive it.
 

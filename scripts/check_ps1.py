@@ -61,7 +61,15 @@ def check(path: Path) -> int:
                 else:
                     opener_line, opener = stack.pop()
                     # the opener statement must contain a block keyword
-                    if not re.search(r"\(|\b(if|else|elseif|function|try|catch|finally|foreach|switch|param)\b", opener):
+                    # `[ordered]@{` is the ordered-hashtable literal (install.ps1 writes
+                    # the skills-lock JSON through it). It opens no block, but it does
+                    # open a brace — without this alternative the checker reports every
+                    # hashtable literal as a mis-nested block and, worse, the real
+                    # brace counts go unverifiable again. The test is the shape of the
+                    # opener (`<something> = [ordered]@{`), not its key names, because
+                    # the JSON it builds is not fixed.
+                    if not re.search(r"\(|\b(if|else|elseif|function|try|catch|finally|foreach|switch|param)\b", opener) \
+                            and not re.search(r"=\s*\[ordered\]@\{", opener):
                         problems.append(
                             f"line {n}: closes a block opened at line {opener_line} by a statement "
                             f"that does not open one: {opener[:60]!r}"
@@ -102,6 +110,23 @@ def check(path: Path) -> int:
             # so `genome installs verify` accused a knowingly-installed copy of drift.
             ("register_install skill", "sh", "skill bundle registered (bash)"),
             ("reg_install 'skill'", "ps1", "skill bundle registered (PowerShell)"),
+            # The canonical-root convention: one real copy at ~/.agents/skills (the
+            # only root a skills backup covers), a link in every other root. Adding
+            # this pair because the four-clone loop it replaces was the measured
+            # defect — four 4.8 MB copies of one skill, none of them the backup's.
+            # The needle in each file is the constant, so a rename on one platform
+            # alone is reported rather than silently diverging.
+            ("SKILL_CANON_ROOT", "sh", "canonical skills root (bash)"),
+            ("$script:SkillCanonRoot", "ps1", "canonical skills root (PowerShell)"),
+            # The relative link target is computed per root depth (a fixed
+            # `../.agents/skills/..` resolves to `~/.claude/.agents/skills/..`), and
+            # that computation must exist on both platforms for the same reason.
+            ("os.path.relpath", "sh", "computed relative link target (bash)"),
+            ("GetRelativePath", "ps1", "computed relative link target (PowerShell)"),
+            # The .skill-lock.json entry: without it `npx skills add` installs a second
+            # copy beside ours and `npx skills update` never refreshes ours.
+            (".skill-lock.json", "sh", "skills-lock entry written (bash)"),
+            (".skill-lock.json", "ps1", "skills-lock entry written (PowerShell)"),
             # The pre-publication retry. Without this pair, one installer degrades to
             # the from-git path while the other reports a dead end, which is exactly
             # the defect that made the README one-liner exit 1 on a working machine.

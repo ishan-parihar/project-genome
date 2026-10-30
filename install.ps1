@@ -5,9 +5,17 @@
 # Installs the `genome` CLI as a Python package: uv -> pipx -> pip, the same
 # chain as install.sh, with the PATH edit done in the Windows registry.
 #
+# The skill takes ONE real copy at the canonical root (~/.agents/skills, the only
+# root a skills backup covers) and links every other detected root at it - the
+# same shape `npx skills add -g` writes, so a machine that has used both paths
+# holds one copy and N links rather than N copies. It also writes the
+# project-genome entry into .skill-lock.json so `npx skills update` refreshes
+# THIS copy instead of installing a second one beside it.
+#
 # Flags:
 #   -Skill        also install the skill bundle into the detected harness dirs
 #   -Dir <path>   extra skills root for -Skill (repeatable)
+#   -CopySkill    copy the skill into every root instead of linking one canonical copy
 #   -FromGitHub   install the CLI from the Git repo instead of PyPI
 #   -NoCta        skip the star/donate epilogue (also: $env:SKIP_CTA = '1')
 #   -ForceRoot    allow running as an elevated administrator
@@ -15,6 +23,7 @@
 param(
     [switch]$Skill,
     [string[]]$Dir,
+    [switch]$CopySkill,
     [switch]$FromGitHub,
     [switch]$NoCta,
     [switch]$ForceRoot
@@ -214,46 +223,157 @@ reg_install() {
 if ($genomeCmd) { reg_install 'bin' $genomeCmd.Source 'via install.ps1' }
 
 # ── skill bundle (optional) ─────────────────────────────────────────────────
+# The canonical skills root: ONE real copy lives there, because it is the root a
+# skills backup covers. Every other detected root gets a link at that copy — the
+# shape `npx skills add -g` writes — so a machine that has used both installers
+# converges on one copy instead of accumulating a clone per harness. The relative
+# link target is computed per root depth: a fixed '..\.agents\skills' resolves
+# into the wrong tree for any root that is not one level deep.
+$script:SkillCanonRoot = Join-Path $env:USERPROFILE '.agents\skills'
+# The lock file, MEASURED 2026-10-30: it sits at ~/.agents/.skill-lock.json — one
+# level ABOVE the skills root — and that is the copy the skills-backup service
+# stages. Writing it inside skills/ puts the entry where no CLI ever looks.
+$script:SkillLock = Join-Path $env:USERPROFILE '.agents\.skill-lock.json'
+function GetRelativePath {
+    param([string]$From, [string]$To)
+    $f = (Resolve-Path $From).Path; $t = (Resolve-Path $To).Path
+    $fi = $f.TrimEnd('\\').Split('\\'); $ti = $t.TrimEnd('\\').Split('\\')
+    $n = 0; while ($n -lt $fi.Count -and $n -lt $ti.Count -and $fi[$n] -ceq $ti[$n]) { $n++ }
+    $up = @(); for ($i = $n; $i -lt $fi.Count; $i++) { $up += '..' }
+    return (($up + $ti[$n..($ti.Count - 1)]) -join '\\')
+}
+function skills_lock_entry {
+    param([string]$CanonDest)
+    if (-not $genomeCmd) { return }
+    $lock = $script:SkillLock
+    $obj = [ordered]@{ version = 3; skills = [ordered]@{} }
+    if (Test-Path $lock) {
+        try {
+            $existing = Get-Content $lock -Raw | ConvertFrom-Json
+            if ($existing.version) { $obj.version = $existing.version }
+            foreach ($p in $existing.skills.PSObject.Properties) {
+                $obj.skills[$p.Name] = [ordered]@{
+                    gitRepo = $p.Value.gitRepo; gitBranch = $p.Value.gitBranch
+                    version = $p.Value.version; installedAt = $p.Value.installedAt
+                    skillFolderHash = $p.Value.skillFolderHash
+                    skillPath = $p.Value.skillPath; source = $p.Value.source
+                }
+            }
+        } catch { Warn "could not read $lock — it will be rewritten with only this skill" }
+    }
+    $hash = (Get-ChildItem $CanonDest -Recurse -File | Where-Object { $_.FullName -notlike '*\.git\*' } |
+        Sort-Object FullName | ForEach-Object { $_.FullName.Substring($CanonDest.Length + 1) + ' ' + (Get-FileHash $_.FullName).Hash } |
+        Out-String)
+    $b = [System.Security.Cryptography.SHA256]::Create().ComputeHash([Text.Encoding]::UTF8.GetBytes($hash))
+    $obj.skills['project-genome'] = [ordered]@{
+        gitRepo = $Repo; gitBranch = $Branch; version = '2026.10-1'
+        installedAt = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+        skillFolderHash = ([BitConverter]::ToString($b).Replace('-','')) -replace '^(.{8}).{8}(.{4})$', '$1....$2'
+        skillPath = 'SKILL.md'; source = 'ishan-parihar/project-genome'
+    }
+    try {
+        ($obj | ConvertTo-Json -Depth 6) | Set-Content $lock -Encoding UTF8
+        Info "skill-lock: project-genome added"
+    } catch { Warn "could not write $lock — `npx skills add` may install a second copy" }
+    if ($genomeCmd) { reg_install 'skill-lock' $lock 'via install.ps1 -Skill' }
+}
 if ($Skill) {
     $roots = @()
-    foreach ($d in @("$env:USERPROFILE\.agents\skills", "$env:USERPROFILE\.claude\skills", "$env:USERPROFILE\.codex\skills")) {
-        if (Test-Path $d) { $roots += $d }
+    # Every harness root that exists, plus the canonical one always. The list is
+    # wider than the three this installer used to probe: .zcode, .codegpt and
+    # opencode also hold real skills, and a link at an as-yet-uncreated root is
+    # harmless.
+    foreach ($d in @($script:SkillCanonRoot,
+                     (Join-Path $env:USERPROFILE '.claude\skills'),
+                     (Join-Path $env:USERPROFILE '.zcode\skills'),
+                     (Join-Path $env:USERPROFILE '.codex\skills'),
+                     (Join-Path $env:USERPROFILE '.codegpt\skills'),
+                     (Join-Path $env:APPDATA 'opencode\skills'))) {
+        if ((Test-Path $d) -or ($d -eq $script:SkillCanonRoot)) { $roots += $d }
     }
     foreach ($extra in $Dir) { if ($extra) { $roots += $extra } }
     if ($roots.Count -eq 0) {
-        $roots = @("$env:USERPROFILE\.agents\skills")
+        $roots = @($script:SkillCanonRoot)
         Info "no harness skills directory found — using $($roots[0])"
     }
-    foreach ($root in $roots) {
-        $dest = Join-Path $root $TargetName
-        New-Item -ItemType Directory -Force -Path $root | Out-Null
-        if (Test-Path (Join-Path $dest '.git')) {
-            # A checkout of this repo: fetch+reset is right for a skills root, and
-            # destructive inside a repo whose tree carries an uncommitted vendored
-            # scripts/genome — the same guard install.sh has, after the reset in
-            # operant's tree discarded a working-tree copy. Refuse rather than
-            # overwrite, and name the command that upgrades that copy properly.
-            $vendored = Join-Path $dest 'scripts\genome'
-            if ((Test-Path $vendored) -and (& git -C $dest diff --quiet -- scripts/genome; $LASTEXITCODE -ne 0)) {
-                Warn "$dest has its own uncommitted scripts/genome — not resetting it"
-                Warn "  inspect it with: git -C $dest diff -- scripts/genome"
-                Warn "  upgrade that copy with: genome installs upgrade --apply (from inside $dest)"
-                continue
-            }
-            git -C $dest fetch origin $Branch --quiet; git -C $dest reset --hard "origin/$Branch" --quiet
-            if ($LASTEXITCODE -eq 0) { Info "updated skill: $dest" } else { Warn "could not update $dest" }
+    $canonDest = Join-Path $script:SkillCanonRoot $TargetName
+    New-Item -ItemType Directory -Force -Path $script:SkillCanonRoot | Out-Null
+    if (Test-Path (Join-Path $canonDest '.git')) {
+        # A checkout of this repo: fetch+reset is right for the canonical copy, and
+        # destructive inside a repo whose tree carries an uncommitted vendored
+        # scripts/genome — the same guard install.sh has, after the reset in
+        # operant's tree discarded a working-tree copy. Refuse rather than
+        # overwrite, and name the command that upgrades that copy properly.
+        $vendored = Join-Path $canonDest 'scripts\genome'
+        if ((Test-Path $vendored) -and (& git -C $canonDest diff --quiet -- scripts/genome; $LASTEXITCODE -ne 0)) {
+            Warn "$canonDest has its own uncommitted scripts/genome — not resetting it"
+            Warn "  inspect it with: git -C $canonDest diff -- scripts/genome"
+            Warn "  upgrade that copy with: genome installs upgrade --apply (from inside $canonDest)"
         }
-        else {
-            git clone --depth 1 --branch $Branch $Repo $dest --quiet 2>$null
-            if ($LASTEXITCODE -eq 0) { Info "installed skill: $dest" } else { Warn "could not clone the skill into $dest" }
-        }
-        # Register the bundle too. install.sh does (`register_install skill`), so a
-        # Windows -Skill run left the only record of the bundle to `installs scan`
-        # while the bash run recorded it -- `genome installs verify` then reported
-        # drift for a copy the operator had knowingly installed.
-        if ($genomeCmd) { reg_install 'skill' $dest 'via install.ps1 -Skill' }
+        git -C $canonDest fetch origin $Branch --quiet; git -C $canonDest reset --hard "origin/$Branch" --quiet
+        if ($LASTEXITCODE -eq 0) { Info "updated skill: $canonDest" } else { Warn "could not update $canonDest" }
     }
+    else {
+        if (Test-Path $canonDest) { Remove-Item $canonDest -Recurse -Force }
+        git clone --depth 1 --branch $Branch $Repo $canonDest --quiet 2>$null
+        if ($LASTEXITCODE -eq 0) { Info "installed skill: $canonDest" } else { Warn "could not clone the skill into $canonDest" }
+    }
+    if ($genomeCmd) { reg_install 'skill' $canonDest 'via install.ps1 -Skill' }
+
+    foreach ($root in $roots) {
+        if ($root -eq $script:SkillCanonRoot) { continue }
+        $dest = Join-Path $root $TargetName
+        if ($CopySkill) {
+            # The escape hatch for a harness that does not follow symlinks.
+            New-Item -ItemType Directory -Force -Path $root | Out-Null
+            if (Test-Path $dest) { Remove-Item $dest -Recurse -Force }
+            if (Copy-Item $canonDest $dest -Recurse) { Info "copied skill: $dest" }
+            else { Warn "could not copy the skill into $dest" }
+            continue
+        }
+        $want = GetRelativePath -From $root -To $canonDest
+        if (Test-Path $dest) {
+            $isLink = (New-Object System.IO.FileInfo($dest)).LinkType -ne $null
+            if ($isLink) {
+                $cur = (New-Object System.IO.FileInfo($dest)).Target
+                if ($cur) { $cur = $cur[0] }
+                if ($cur -eq $want) { Info "skill already linked: $dest"; continue }
+                Remove-Item $dest -Force
+            }
+            else {
+                # A real copy from an earlier installer run. Verified identical
+                # before it is replaced, so a root holding local work never loses
+                # it silently — the same check install.sh makes.
+                $same = $true
+                $a = Get-ChildItem $canonDest -Recurse -File | Where-Object { $_.FullName -notlike '*\.git\*' } | ForEach-Object { $_.FullName.Substring($canonDest.Length + 1) } | Sort-Object
+                $b = Get-ChildItem $dest -Recurse -File | Where-Object { $_.FullName -notlike '*\.git\*' } | ForEach-Object { $_.FullName.Substring($dest.Length + 1) } | Sort-Object
+                if ($null -ne (Compare-Object $a $b)) { $same = $false }
+                if ($same) {
+                    foreach ($rel in $b) {
+                        if ((Get-FileHash (Join-Path $canonDest $rel)).Hash -ne (Get-FileHash (Join-Path $dest $rel)).Hash) { $same = $false; break }
+                    }
+                }
+                if ($same) {
+                    Remove-Item $dest -Recurse -Force
+                    Info "replaced identical skill copy with a link: $dest"
+                }
+                else {
+                    Warn "$dest differs from the canonical copy — keeping it (compare: diff -rq $canonDest $dest)"
+                    if ($genomeCmd) { reg_install 'skill' $dest 'via install.ps1 -Skill (kept: differs from canonical)' }
+                    continue
+                }
+            }
+        }
+        try {
+            New-Item -ItemType SymbolicLink -Path $dest -Target $want -Force | Out-Null
+            Info "linked skill: $dest -> $want"
+            if ($genomeCmd) { reg_install 'skill' $root 'via install.ps1 -Skill (root links the canonical copy)' }
+        }
+        catch { Warn "could not link the skill into $root (a symlink needs Developer Mode or an elevated shell)" }
+    }
+    skills_lock_entry $canonDest
 }
+
 
 # ── summary ─────────────────────────────────────────────────────────────────
 Write-Host ''
