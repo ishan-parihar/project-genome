@@ -49,14 +49,27 @@ the claim's first half true.
 
 ### 2.1 `.claude` — 11 real copies, each a *second source of truth*
 
-These eleven are directories, not links, and ten of them are absent from
+These eleven are directories, not links, and nine of them are absent from
 `~/.agents/skills`:
 
 ```
 aportal   arch-deb-packaging   arch-deb-packaging-workspace   browseros-neo
 claude-code-admin   facebook-mcp   gemini-model-manager   omarchy-bar-management
-project-genome   wealth-sovereign
+project-genome   wealth-sovereign   pinokio
 ```
+
+**Re-measured 2026-10-30 22:07 — the loss claim holds, the "real only in .claude"
+claim was nearly empty, and `portal` never existed.** Of those eleven, **only
+`arch-deb-packaging-workspace` has no second copy anywhere on the machine**. The other
+nine are **real directories in `.zcode/skills` as well**, so wiping `.claude` loses
+none of them. What it loses them from is the **backup**: measured with
+`git -C ~/.agents ls-files skills/<name>`, **nine of the eleven are not tracked at
+all** (`aportal`, `facebook-mcp`, `gemini-model-manager`, `omarchy-bar-management`,
+`wealth-sovereign`, `claude-code-admin`, `arch-deb-packaging`,
+`arch-deb-packaging-workspace`, and `.zcode`'s `security-ops`), while
+`browseros-neo`, `project-genome` and `pinokio` are tracked. So the disk-failure claim
+below stands, but for **nine** skills, not eight, and S3's "move them into
+`~/.agents/skills/`" is **one move serving two roots**, not two.
 
 Of those, **`project-genome` and `browseros-neo` also exist in `~/.agents/skills`** —
 byte-identical content (`diff -rq` reports only `.git/` internals and a
@@ -64,9 +77,9 @@ byte-identical content (`diff -rq` reports only `.git/` internals and a
 skill, one per root, installed by `install.sh`'s `--skill` loop rather than by one
 install and four links.
 
-The other eight are real only in `.claude`. They are **not lost** — `.zcode/skills`
-holds them as real dirs too — but they are also **not in the backup**. A disk failure
-loses eight skills that no gitsync copy survives.
+The other nine are real in `.claude` too. They are **not lost** if `.claude` is wiped
+(`.zcode/skills` holds them as real dirs) — but they are also **not in the backup**. A
+disk failure loses nine skills that no gitsync copy survives.
 
 ### 2.2 `.zcode` — 284 links, 207 of which point at `.claude`, not `.agents`
 
@@ -121,6 +134,23 @@ That last overlap is the redundancy that is *easiest to miss*: `~/.agents/career
 `~/.agents/skills/resume-skills` both hold the resume family; `.claude/skills`
 symlinks `resume-skills -> /home/ishanp/.agents/career/resume-skills`, i.e. through
 the root-level copy rather than the `skills/` one.
+
+**Re-measured 2026-10-30 22:00 — this specific claim is false and is retracted.**
+`~/.agents/skills/resume-skills` **does not exist**. There is exactly one
+`resume-skills` on the machine, at `~/.agents/career/resume-skills` (8 entries, 6
+`SKILL.md`), it is git-tracked by the backup, and `.claude/skills/resume-skills`
+links straight at it. So there is no duplication here to clean and **S6 has no
+target in the resume family** — the direction of the claim (report first) was
+right, but the figure was taken from the surface-area autopsy rather than
+re-measured, and it should not have been. Measured instead, the real tail is:
+`~/.agents/` holds five *real* skills with no `skills/` counterpart
+(`business-actualisation`, `slideforge`, `law-of-one` 63 skills, `lifeos-sync`,
+`yuanbao`), four *category* dirs that also exist under `skills/` (`creative`,
+`devops`, `software-development`, plus `career` which does not), and two archive
+stubs. Every one of the five real ones is already git-tracked, so the backup
+covers them; **what S6 should actually reconcile is `career`, `creative`,
+`devops` and `software-development` appearing at both `~/.agents/<cat>` and
+`~/.agents/skills/<cat>`** — a category-level overlap, not a skill-level one.
 
 ### 2.5 The lock file names 23 of 153
 
@@ -203,10 +233,10 @@ the deletions it implies are Tier 3 of the plan in `../plans/`.
 |---|---|---|
 | S1 | Repoint `.claude`, `.zcode`, `.codex` `project-genome` at the `.agents` copy: remove each clone, create each link | `diff -rq ~/.agents/skills/project-genome <root>/skills/project-genome` empty except the link; inode identical |
 | S2 | Re-link `good-skill` or delete the dangling link | `for l in $(ls -A …); do [ -e "$l" ] \|\| echo broken; done` returns empty |
-| S3 | Move the eight `.claude`-only skills into `~/.agents/skills/` and link them | each name resolves under `.agents`; the backup's next `skills-backup` run stages them (it stages `skills` wholesale) |
-| S4 | Same for `.zcode`'s `security-ops` and the two `.codegpt` / one `opencode` skills | as S3 |
+| S3 | Move the **nine untracked `.claude`/`.zcode` real copies** (`aportal`, `facebook-mcp`, `gemini-model-manager`, `omarchy-bar-management`, `wealth-sovereign`, `claude-code-admin`, `arch-deb-packaging`, `arch-deb-packaging-workspace`, `security-ops`) into `~/.agents/skills/` and link them | each name resolves under `~/.agents/skills`; the backup's next `skills-backup` run stages it. **One move serves both roots, because eight of the nine are real in `.claude` AND `.zcode`** |
+| S4 | `.codegpt`'s `browser-automation` and `game-development` (real only there; `.agents` has neither, and `.codegpt` is not a git repo) have no second copy — move both into `~/.agents/skills/` and link. **And `browseros-neo` is worse than the audit said: it has FOUR real copies** — `.agents` (tracked), `.claude`, opencode — plus a `.zcode` link into opencode, all byte-identical. Repoint `.claude` and opencode at the `.agents` copy like S1 | as S3 |
 | S5 | Flatten the chained links: `.zcode`'s **207** links that name `.claude` in their target become links directly to `.agents` | `readlink` on every zcode entry returns a path under `~/.agents` |
-| S6 | Reconcile `~/.agents/<skill>` (the root-level tail) against `~/.agents/skills/<skill>` — one owner per skill | no skill family exists twice under `.agents` |
+| S6 | Reconcile the **four category dirs** that appear at both `~/.agents/<cat>` and `~/.agents/skills/<cat>` (`career`, `creative`, `devops`, `software-development`) — one owner per category | `ls -d ~/.agents/<cat> ~/.agents/skills/<cat>` shows one of each, not both. **The resume-skills figure this row was first written against was false (see §2.4) and is retracted** |
 | S7 | Register the 131 unlocked skills, or accept that `npx skills update` will not refresh them | `python3 -c "import json;…"` count of lock entries vs on-disk dirs |
 
 **What S1–S7 do not fix:** the installer's four-clone loop (§3.2) and its probe list

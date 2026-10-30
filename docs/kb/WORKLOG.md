@@ -117,3 +117,4 @@ runnable `scripts/genome`, but nothing put a `genome` on PATH), the README insta
 RUNBOOK parity note, and the AGENTS loci table. The skills-root audit that ordered all of it is
 `docs/audit/2026-10-30-SKILLS-ROOT-AUDIT.md`.
 - **2026-10-31T02:53** — the skills-root audit re-measured: the zcode chain is 207 links, not 43 — the published count was broken
+- **2026-10-31T03:50** — the skills-root audit re-measured a second time: three of its own figures corrected, one claim retracted outright
