@@ -11,7 +11,7 @@ Everything below is stdlib-only unless it says otherwise.
 | the CLI suite | `python3 scripts/test_genome.py` | 38/38 measured 2026-10-30. Runs against a **scratch copy**; it never writes your project |
 | the packaging suite | `python3 scripts/test_package.py` | needs `dist/` to hold the built artifacts; 8/8. Installs the wheel in a throwaway venv and asserts byte parity with `scripts/genome` |
 | the packaging-modes suite | `python3 scripts/test_package_modes.py` | 5/5 measured 2026-10-30. Covers the sdist path, the whole command surface in installed mode, the exit codes a CI job chains on, and the Python floor. **Run it from a neutral cwd** (`cwd=/`) — from the repo root the local `project_genome/` shadows site-packages |
-| installer parity | `python3 scripts/check_ps1.py` | structure + cross-installer parity for `install.ps1`; 258 lines measured 2026-10-30 |
+| installer parity | `python3 scripts/check_ps1.py` | structure + cross-installer parity for `install.ps1`; 412 lines measured 2026-10-30 after the canonical-root skill rework |
 | outline-language probe | `python3 scripts/probe-outline-languages.py` | 9/9 measured 2026-10-30 |
 | build both artifacts | `uv build` | produces the sdist and the wheel in `dist/`; the packaging suites install those, not the source tree |
 | lint this repo | `python3 scripts/genome lint --all` | plain `lint` truncates; `--all` prints every finding |

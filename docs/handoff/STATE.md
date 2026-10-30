@@ -75,7 +75,7 @@ what `genome wake` shows.
   which is PQ-9. So locus 2 was a deploy target, not a second source — and the
   meta-root's surface-area audit said as much, now re-measured rather than assumed.
 - **All suites green, measured 2026-10-30:** `test_genome` 38/38, `test_package` 8/8,
-  `test_package_modes` 5/5, `check_ps1` parity ok at 258 lines, `probe-outline-languages`
+  `test_package_modes` 5/5, `check_ps1` parity ok at 412 lines, `probe-outline-languages`
   9/9. Two measurement failures were diagnosed on the way and both were environment, not
   defect: a stale `dist/` (built 05:34 against a `scripts/genome` rebuilt at 08:48) failed
   the sdist byte-parity case until `uv build` was re-run; and
