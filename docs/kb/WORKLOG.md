@@ -75,3 +75,4 @@ worklog tail. Two prep items recorded: PQ-4 and PQ-5 in `TODO.md` are the traps 
 
 Also closed by this same pass: **README.md gained one line routing a contributor to `AGENTS.md` and
 `docs/RUNBOOK.md`** (PQ-7), which is the whole of the README change — the PyPI front page keeps its content.
+- **2026-10-30T17:09** — the execution outline, and the four measurements that re-ordered it

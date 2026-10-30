@@ -86,7 +86,7 @@ the vendored `scripts/genome`.
 | what does a fresh agent read, in order | `docs/handoff/README.md` |
 | what is left to do, and what was decided about each item | `TODO.md` |
 | what did we ask the operator, and what did they rule | `docs/kb/ASKS.md` |
-| how will we do X (plans) | `docs/plans/` |
+| how will we do X (plans) | `docs/plans/` — the live execution order is `docs/plans/2026-10-30-remaining-implementation-gaps-outline.md` |
 | what was audited, what was found | `docs/audit/` |
 | what was tried and rejected — do not re-litigate | `docs/kb/CLOSED.md` |
 | exact commands, environment traps | `docs/RUNBOOK.md` |
