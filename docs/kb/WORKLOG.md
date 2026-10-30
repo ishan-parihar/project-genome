@@ -116,3 +116,4 @@ ground truth, `bash -n`, `check_ps1` green at 412 lines with four new parity gua
 runnable `scripts/genome`, but nothing put a `genome` on PATH), the README install section, the
 RUNBOOK parity note, and the AGENTS loci table. The skills-root audit that ordered all of it is
 `docs/audit/2026-10-30-SKILLS-ROOT-AUDIT.md`.
+- **2026-10-31T02:53** — the skills-root audit re-measured: the zcode chain is 207 links, not 43 — the published count was broken

@@ -68,16 +68,27 @@ The other eight are real only in `.claude`. They are **not lost** — `.zcode/sk
 holds them as real dirs too — but they are also **not in the backup**. A disk failure
 loses eight skills that no gitsync copy survives.
 
-### 2.2 `.zcode` — 284 links, 43 of which point at `.claude`, not `.agents`
+### 2.2 `.zcode` — 284 links, 207 of which point at `.claude`, not `.agents`
 
 The zcode tree is the *most* correct root by count, but its links are chained:
-`~/.zcode/skills/devops → /home/ishanp/.claude/skills/devops`, then
-`~/.claude/skills/devops → ../../.agents/skills/devops`. Two hops, through a
-directory that is itself a link. Measured: 43 links resolve directly to
-`/home/ishanp/.claude/skills`, and a further ~150 more resolve into `.claude`'s
-nested category subdirectories. **A single pass at `.agents` would collapse all of
-those to one hop**, which also removes the case where a link's target is a link to a
-link that was deleted.
+`~/.zcode/skills/adepthood → /home/ishanp/.claude/skills/law-of-one/energy-centers/adepthood`,
+then that `.claude` path resolves onward into `~/.agents/skills`. Two hops, through a
+directory that is itself a link.
+
+**Measured: 207 of the 284 zcode links name `/home/ishanp/.claude/skills` in their target**
+(and the same 207 resolve through `.claude`, so the two counts agree). **A single pass at
+`.agents` would collapse every one of those to one hop**, which also removes the case
+where a link's target is a link to a link that was deleted.
+
+**Re-measured 21:17 the same day: 207, and the published 43 was an artefact of a broken
+count.** The audit's "43 directly to `.claude`, plus about 150 into `.claude`'s nested
+category subdirectories" was measured with a `readlink` loop whose `case` pattern matched
+only some targets; re-run plainly it returns 207 for the whole tree. The number is *larger*
+than published, so **S5 (flatten the chain) is the highest-value single pass in this
+document**, not a tidy-up: it removes two hops from 207 links and every
+link-to-a-deleted-link case in the tree. This is the one figure in this audit that was
+wrong in the direction of understating the defect, and the audit's own CR-4 rule — a
+figure cites the command that produced it — is what caught it on re-measurement.
 
 One link is already broken: `good-skill -> ../../.agents/skills/good-skill`, and the
 target does not exist.
@@ -194,7 +205,7 @@ the deletions it implies are Tier 3 of the plan in `../plans/`.
 | S2 | Re-link `good-skill` or delete the dangling link | `for l in $(ls -A …); do [ -e "$l" ] \|\| echo broken; done` returns empty |
 | S3 | Move the eight `.claude`-only skills into `~/.agents/skills/` and link them | each name resolves under `.agents`; the backup's next `skills-backup` run stages them (it stages `skills` wholesale) |
 | S4 | Same for `.zcode`'s `security-ops` and the two `.codegpt` / one `opencode` skills | as S3 |
-| S5 | Flatten the chained links: `.zcode`'s 43 links that resolve to `.claude` become links to `.agents` | `readlink` on every zcode entry returns a path under `~/.agents` |
+| S5 | Flatten the chained links: `.zcode`'s **207** links that name `.claude` in their target become links directly to `.agents` | `readlink` on every zcode entry returns a path under `~/.agents` |
 | S6 | Reconcile `~/.agents/<skill>` (the root-level tail) against `~/.agents/skills/<skill>` — one owner per skill | no skill family exists twice under `.agents` |
 | S7 | Register the 131 unlocked skills, or accept that `npx skills update` will not refresh them | `python3 -c "import json;…"` count of lock entries vs on-disk dirs |
 
@@ -211,3 +222,28 @@ the deletions it implies are Tier 3 of the plan in `../plans/`.
 - The `.claude/.sync-protect` list. It names four skills; `gstack` and `ui-styling` no
   longer exist anywhere on the machine, so the protect list is stale in the
   direction that hides breakage rather than causing it.
+
+## Re-measured 2026-10-30, 21:17 — three figures moved since publication
+
+The audit was published the same day, so the tables above are a snapshot. Re-measured
+four hours later, the drift is small but it is **upward in the wrong direction**:
+
+| figure | published 10:30 | re-measured 21:17 | what moved |
+|---|---|---|---|
+| `.agents/skills` top-level real dirs | 152 | **153** | one more skill landed in the canonical root |
+| `.agents/skills` SKILL.md | 260 | **263** | the same three new skills |
+| `.claude/skills` links | 125 | **126** | one more link, and its real copies went 11 -> 11 |
+| `.claude/skills` SKILL.md | 301 | **303** | two more skills reachable |
+| `.zcode` links that name `.claude` in their target | 43 | **207** | **the audit undercounted the chain ~5x — a broken count, not drift** |
+| backup last commit | `9b1b0d66` (10:20) | `0851491b` (20:18) | the hourly timer ran ten more times |
+
+The zcode chain figure is the one that changes a decision, and it was measured wrong.
+The published "43 directly to `.claude`, plus about 150 into `.claude`'s nested category
+subdirectories" came from a `readlink` loop whose `case` pattern matched only some
+targets; run plainly it returns **207** for the whole tree, and 207 is also the
+resolved count, so the two agree. `~/.zcode/skills/devops` is not even a link (it is
+one of `.zcode`'s two real dirs), and **207 of its siblings point through `.claude`** —
+e.g. `~/.zcode/skills/adepthood -> /home/ishanp/.claude/skills/law-of-one/energy-centers/adepthood`.
+So S5 (flatten the chain) is **more** valuable than the audit claimed, not less: a
+single pass that re-points those 207 at `~/.agents` removes two hops and every
+link-to-a-deleted-link case in the tree. Everything else in this document stands.
