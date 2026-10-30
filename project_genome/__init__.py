@@ -24,15 +24,29 @@ import sys
 from pathlib import Path
 
 _CLI = Path(__file__).with_name("_genome.py")
+_SOURCE_CLI = Path(__file__).resolve().parent.parent / "scripts" / "genome"
 
 
 def _cli_path() -> Path:
-    if not _CLI.is_file():
-        raise SystemExit(
-            "project-genome: the CLI file is missing from the installed package "
-            f"(expected {_CLI}). Reinstall: pip install --force-reinstall project-genome"
-        )
-    return _CLI
+    """The CLI file to run: the packaged one, or the repo's own build when this
+    wrapper was picked up from the source tree.
+
+    A checkout of this repo has `project_genome/` but no `_genome.py` — that file
+    is force-included into the package by the build, never committed. Running
+    `python -m project_genome` from the repo root therefore imported this wrapper
+    from the cwd ahead of site-packages and failed with "the CLI file is missing
+    ... Reinstall: pip install --force-reinstall", which is nonsense advice on a
+    machine whose install is fine. Resolve to the source build in that case so a
+    repo-local run behaves like `python3 scripts/genome`.
+    """
+    if _CLI.is_file():
+        return _CLI
+    if _SOURCE_CLI.is_file():
+        return _SOURCE_CLI
+    raise SystemExit(
+        "project-genome: the CLI file is missing from the installed package "
+        f"(expected {_CLI}). Reinstall: pip install --force-reinstall project-genome"
+    )
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -107,6 +107,40 @@ info "python3 $py_ver ok"
 # symlink while the freshly installed -21 sat in the uv tool dir).
 installed_with=""
 INSTALL_BIN_DIR=""
+#
+# The last rung, and it must actually reach the floor. On Debian/Ubuntu the system
+# Python is PEP 668 externally-managed, so `pip install --user` is REFUSED
+# outright (verified on this host's /usr/bin/python3.14, whose
+# /usr/lib/python3.14/EXTERNALLY-MANAGED makes even --user an error). A chain
+# whose last rung cannot succeed on the most common Linux distros is not a chain,
+# so the refusal falls back to an isolated venv — the one form of pip install that
+# never needs to touch a managed Python.
+#
+# Every rung that can fail calls this: uv being present but unable to install
+# (the package is not published yet) must reach the venv too, not stop at pipx.
+# The `|| return 1` shape matters: under `set -e`, a bare `return 1` from a
+# function called in a condition-less context aborts the script, which would
+# kill the run before the CLI-unmet handler below (and before the --skill
+# bundle) — observed with exactly that symptom.
+try_pip_floor() {
+  if python3 -m pip install --user --force-reinstall "$1" 2>/dev/null; then
+    installed_with="pip --user${2:+ $2}"
+    return 0
+  fi
+  if python3 -m venv "$PREFIX/tool" >/dev/null 2>&1 \
+     && "$PREFIX/tool/bin/pip" install --quiet --force-reinstall "$1"; then
+    installed_with="pip (isolated venv — system Python is externally-managed${2:+, $2})"
+    INSTALL_BIN_DIR="$PREFIX/tool/bin"
+    return 0
+  fi
+  return 1
+}
+# The caller's context decides what a failure means: `--skill` still owes the
+# bundle, a CLI-only run dies with the remedy. Both are guarded call sites
+# (`if ! try_pip_floor ...`) precisely so the `return 1` is NOT the last command
+# of the script under `set -e` — a bare failing call here aborts the whole
+# installer before the CLI-unmet handler, observed with exactly that symptom
+# (the --skill bundle never ran and nothing said why).
 if [ "$FROM_GITHUB" = "1" ]; then
   command -v git >/dev/null 2>&1 || die "--from-github needs git — install git, or drop the flag to install from PyPI"
   info "installing from the Git repository (unreleased build)"
@@ -117,20 +151,9 @@ if [ "$FROM_GITHUB" = "1" ]; then
     pipx install --force "git+$REPO" && installed_with="pipx (from git)"
     INSTALL_BIN_DIR="$(pipx environment --value PIPX_BIN_DIR 2>/dev/null || echo "$BIN_DIR")"
   else
-    # rung 3, and the floor must actually reach the floor: on Debian/Ubuntu the
-    # system Python is PEP 668 externally-managed, so `pip install --user` is
-    # REFUSED outright (verified on this host's /usr/bin/python3.14, whose
-    # /usr/lib/python3.14/EXTERNALLY-MANAGED makes even --user an error). A chain
-    # whose last rung cannot succeed on the most common Linux distros is not a
-    # chain. So detect the refusal and fall back to an isolated venv, which is
-    # the one form of pip install that never needs to touch a managed Python.
-    if python3 -m pip install --user --force-reinstall "git+$REPO" 2>/dev/null; then
-      installed_with="pip --user (from git)"
-    elif python3 -m venv "$PREFIX/tool" >/dev/null 2>&1 \
-         && "$PREFIX/tool/bin/pip" install --quiet --force-reinstall "git+$REPO"; then
-      installed_with="pip (isolated venv, from git — system Python is externally-managed)"
+    if ! try_pip_floor "git+$REPO" "from git"; then
+      warn "the pip floor could not install it — see the errors above"
     fi
-    INSTALL_BIN_DIR="$PREFIX/tool/bin"
   fi
 elif command -v uv >/dev/null 2>&1; then
   info "installing with uv"
@@ -146,20 +169,32 @@ elif command -v uv >/dev/null 2>&1; then
     if command -v pipx >/dev/null 2>&1; then
       pipx install --force "$PKG" && { installed_with="pipx"; INSTALL_BIN_DIR="$(pipx environment --value PIPX_BIN_DIR 2>/dev/null || echo "$BIN_DIR")"; }
     fi
+    # uv present but unable to install is the pre-publication case, and it must
+    # still reach the floor: pipx absent (or also refusing) leaves the venv. Found
+    # by running the installer: this chain stopped here and reported "the install
+    # did not report a successful method" on a machine where uv existed.
+    if [ -z "$installed_with" ]; then
+      if ! try_pip_floor "$PKG"; then
+        warn "the pip floor could not install it — see the errors above"
+      fi
+    fi
   fi
 elif command -v pipx >/dev/null 2>&1; then
   info "installing with pipx"
   pipx install --force "$PKG" && installed_with="pipx"
   INSTALL_BIN_DIR="$(pipx environment --value PIPX_BIN_DIR 2>/dev/null || echo "$BIN_DIR")"
+  # pipx present but refusing (it delegates to the same PEP 668 refusal): fall to
+  # the floor rather than leaving the operator with no CLI.
+  if [ -z "$installed_with" ]; then
+    if ! try_pip_floor "$PKG"; then
+      warn "the pip floor could not install it — see the errors above"
+    fi
+  fi
 else
   info "installing with pip"
-  if python3 -m pip install --user --upgrade "$PKG" 2>/dev/null; then
-    installed_with="pip --user"
-  elif python3 -m venv "$PREFIX/tool" >/dev/null 2>&1 \
-       && "$PREFIX/tool/bin/pip" install --quiet --force-reinstall "$PKG"; then
-    installed_with="pip (isolated venv — system Python is externally-managed)"
+  if ! try_pip_floor "$PKG"; then
+    warn "the pip floor could not install it — see the errors above"
   fi
-  INSTALL_BIN_DIR="$PREFIX/tool/bin"
 fi
 # The CLI is the point of the script, but a --skill run has a second explicit
 # request. When the package cannot be installed (typically: not published yet) and
