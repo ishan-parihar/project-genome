@@ -101,9 +101,9 @@ genome q list --open
 ## Generated zones
 
 ```
-<!-- genome:zone NAME sha=XXXXXXXXXXXX -->
+<!-- genome:zone PLACEHOLDER sha=XXXXXXXXXXXX -->
 …generated body…
-<!-- genome:end NAME -->
+<!-- genome:end PLACEHOLDER -->
 ```
 
 The sha covers the body. When the body no longer matches it, someone hand-edited the zone: that is E006. Fix the

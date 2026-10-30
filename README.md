@@ -182,6 +182,8 @@ Edit `src/`, rebuild with `python3 scripts/build.py`, verify with `python3 scrip
 
 Build the package with `uv build`; the wheel ships the same built file the repos vendor, so a pip-installed genome and a vendored genome are the same bytes. Publishing to PyPI is documented in [docs/PUBLISHING.md](docs/PUBLISHING.md) — the name is free and the build is verified, so it is a token and one command away.
 
+**Working on this repo (an agent, or a contributor)**: this repo runs its own genome, so [AGENTS.md](AGENTS.md) is the entry contract and [docs/RUNBOOK.md](docs/RUNBOOK.md) holds the exact commands. The three suites that gate a change are `scripts/test_genome.py`, `scripts/test_package.py` and `scripts/test_package_modes.py` — the last two install the built artifacts, so run `uv build` before them. `genome lint` is run as `python3 scripts/genome lint`, not `genome lint`.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).

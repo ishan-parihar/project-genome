@@ -26,7 +26,20 @@ def write_zone(path: Path, name: str, body: str) -> bool:
 
 
 def broken_zones(text: str) -> list[str]:
-    starts = re.findall(r"<!-- genome:zone (\S+) sha=", text)
+    """Zone starts that no `zones()` match closes.
+
+    A start marker inside a code fence is documentation, not a zone: `headings()`
+    already skips fences, and a manual that shows the marker format would otherwise
+    fail the lint it is describing (the case that produced this). The fenced example
+    in `references/core.md` names a zone that can never be written, so `zones()`
+    never finds it and the unguarded regex called it broken."""
+    lines = text.splitlines()
+    starts, fence = [], False
+    for ln in lines:
+        if ln.lstrip().startswith(("```", "~~~")):
+            fence = not fence
+        elif not fence:
+            starts += re.findall(r"<!-- genome:zone (\S+) sha=", ln)
     whole = {m.group(1) for m in ZONE_RE.finditer(text)}
     return sorted({n for n in starts if n not in whole or starts.count(n) > 1})
 
