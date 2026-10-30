@@ -29,20 +29,23 @@ Next: `genome ask "<question>"` → the owning section; read only that range.
 ## Install
 
 ```bash
-uv tool install project-genome        # recommended: self-contained, no venv
-```
-
-```bash
-pipx install project-genome            # or: pip install --user project-genome
-```
-
-Or, without a package manager:
-
-```bash
 curl -fsSL https://raw.githubusercontent.com/ishan-parihar/project-genome/main/install.sh | bash
 ```
 
-The script tries `uv`, then `pipx`, then `pip --user`. Nothing is installed into a **system** Python: where `pip --user` is refused outright (the PEP 668 [externally-managed environments](https://peps.python.org/pep-0668/) that Debian, Ubuntu and Mint mark on their system Pythons — `/usr/lib/python3.14/EXTERNALLY-MANAGED`), the last rung falls back to an isolated venv at `$XDG_DATA_HOME/project-genome/tool`, which also makes re-running the installer always pick up the current build. On Windows: `irm https://raw.githubusercontent.com/ishan-parihar/project-genome/main/install.ps1 | iex`.
+On Windows: `irm https://raw.githubusercontent.com/ishan-parihar/project-genome/main/install.ps1 | iex`.
+
+The installer is one line and it decides the rest: it tries `uv`, then `pipx`, then `pip` — and where every PyPI rung refuses (the package is not published yet, or you are installing an unreleased build), it installs from the Git repository instead, if this machine has git. Nothing is installed into a **system** Python: where `pip --user` is refused outright (the PEP 668 [externally-managed environments](https://peps.python.org/pep-0668/) that Debian, Ubuntu and Mint mark on their system Pythons — `/usr/lib/python3.14/EXTERNALLY-MANAGED`), the last rung falls back to an isolated venv at `$XDG_DATA_HOME/project-genome/tool`, which also makes re-running the installer always pick up the current build.
+
+Once it is on PyPI, the plain package managers work and need no script or git:
+
+```bash
+uv tool install project-genome        # recommended: self-contained, no venv
+pipx install project-genome           # or: pip install --user project-genome
+```
+
+To update later, re-run the installer — it is idempotent, so a second run updates the copy it put there without duplicating PATH lines or config. A repo that **vendors** `scripts/genome` updates that copy with `genome installs upgrade --apply` instead, because the CLI must never overwrite a repo's own vendored file.
+
+Flags the installer takes: `--skill` (also install the agent-skill bundle), `--dir <path>` (an extra skills root, repeatable), `--from-github` (force the Git path even after publication), `--no-cta`, `--force-root`.
 
 **As an agent skill** — the methodology, the CLI, and the references, installed into the harnesses you have:
 
@@ -180,9 +183,9 @@ evals/             graded evals + fixtures
 
 Edit `src/`, rebuild with `python3 scripts/build.py`, verify with `python3 scripts/test_genome.py`. The version ledger in `scripts/releases.txt` tells `genome upgrade` a hand-patched vendored copy from a release.
 
-Build the package with `uv build`; the wheel ships the same built file the repos vendor, so a pip-installed genome and a vendored genome are the same bytes. Publishing to PyPI is documented in [docs/PUBLISHING.md](docs/PUBLISHING.md) — the name is free and the build is verified, so it is a token and one command away.
+Build the package with `uv build`; the wheel ships the same built file the repos vendor, so a pip-installed genome and a vendored genome are the same bytes. Publishing to PyPI is documented in [docs/PUBLISHING.md](docs/PUBLISHING.md): the build is verified and the name is free, but publication itself needs an API token and is deliberately an operator step — until it runs, use the installer above, which already falls back to the Git path.
 
-**Working on this repo (an agent, or a contributor)**: this repo runs its own genome, so [AGENTS.md](AGENTS.md) is the entry contract and [docs/RUNBOOK.md](docs/RUNBOOK.md) holds the exact commands. The three suites that gate a change are `scripts/test_genome.py`, `scripts/test_package.py` and `scripts/test_package_modes.py` — the last two install the built artifacts, so run `uv build` before them. `genome lint` is run as `python3 scripts/genome lint`, not `genome lint`.
+**Working on this repo (an agent, or a contributor)**: this repo runs its own genome, so [AGENTS.md](AGENTS.md) is the entry contract and [docs/RUNBOOK.md](docs/RUNBOOK.md) holds the exact commands. The suites that gate a change are `scripts/test_genome.py`, `scripts/test_package.py`, `scripts/test_package_modes.py` and `scripts/check_ps1.py` — the middle two install the built artifacts, so run `uv build` before them. The same chain is the pre-publish gate. `genome lint` is run as `python3 scripts/genome lint`, not `genome lint`.
 
 ## License
 

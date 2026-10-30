@@ -78,20 +78,50 @@ def check(path: Path) -> int:
     pair = path.parent / "install.sh"
     if pair.is_file():
         sh = pair.read_text()
-        # needle, the file it must appear in, the human-readable name
+        # needle, the file it must appear in, the human-readable name.
+        # 'both' means the guard must appear in BOTH installers, and the loop below
+        # checks both directions - a pair that lives on only one platform is a real
+        # asymmetry and must be named as one-sided explicitly, not left as a 'both'
+        # that silently fails.
         guards = [
             ("externally-managed", "both", "externally-managed venv fallback"),
             ("--force-reinstall", "both", "force-reinstall on the venv rung"),
             ("not resetting it", "both", "vendored-copy reset guard"),
             ("needs git to fetch the bundle", "both", "--skill prerequisite at request time"),
             ("installs register", "both", "registry record of this install"),
-            ("VenvBinDir", "both", "verify checks the binary this run installed"),
+            # Platform-native, so one-sided by construction: bash names the resolved
+            # bin's directory with $BIN_DIR_FOUND, PowerShell with $script:VenvBinDir.
+            # Comparing these across files would report a permanent parity gap, so
+            # each is checked only in the file that owns the construct.
+            ("BIN_DIR_FOUND", "sh", "verify checks the binary this run installed (bash)"),
+            ("VenvBinDir", "ps1", "verify checks the binary this run installed (PowerShell)"),
+            # The parity pairs added by the red-team round: each one closes a gap
+            # that a mutation exposed. The skill-registration pair exists because
+            # removing `reg_install 'skill'` from install.ps1 passed this checker
+            # silently - the Windows installer recorded the bin but not the bundle,
+            # so `genome installs verify` accused a knowingly-installed copy of drift.
+            ("register_install skill", "sh", "skill bundle registered (bash)"),
+            ("reg_install 'skill'", "ps1", "skill bundle registered (PowerShell)"),
+            # The pre-publication retry. Without this pair, one installer degrades to
+            # the from-git path while the other reports a dead end, which is exactly
+            # the defect that made the README one-liner exit 1 on a working machine.
+            ("not on PyPI yet", "both", "pre-publication from-git retry"),
+            # Update guidance: an installed user's next question has an answer on
+            # both platforms or the installer has a platform-dependent hole.
+            ("To update later", "both", "update guidance in the success summary"),
         ]
         for needle, where, label in guards:
-            if where == "both" and needle not in text:
-                problems.append(f"parity gap — {label}: present in install.sh but missing from install.ps1")
-            elif needle not in text:
-                problems.append(f"missing guard — {label}")
+            if where == "both":
+                if needle not in text:
+                    problems.append(f"parity gap — {label}: present in install.sh but missing from install.ps1")
+                if needle not in sh:
+                    problems.append(f"parity gap — {label}: present in install.ps1 but missing from install.sh")
+            elif where == "sh":
+                if needle not in sh:
+                    problems.append(f"missing guard — {label} in install.sh")
+            else:
+                if needle not in text:
+                    problems.append(f"missing guard — {label} in install.ps1")
 
     if problems:
         print(f"FAIL {path.name}:")

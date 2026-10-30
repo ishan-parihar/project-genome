@@ -145,7 +145,27 @@ else {
         }
     }
 }
-if (-not $installedWith) { Die "the install did not report a successful method — see the errors above" }
+# The CLI is the point of the script, but the same pre-publication retry install.sh
+# performs: every PyPI rung refusing on a host that HAS git means the package is not
+# published yet, and the from-git install is one command away on this very machine.
+# Telling the operator to re-run with a flag repeats the failure instead of fixing it.
+if (-not $installedWith -and (Get-Command git -ErrorAction SilentlyContinue)) {
+    Warn "the package is not on PyPI yet - retrying from the Git repository"
+    if (Get-Command uv -ErrorAction SilentlyContinue) {
+        uv tool install --force --from "git+$Repo" $Pkg
+        if ($LASTEXITCODE -eq 0) { $installedWith = 'uv (from git)' }
+    }
+    elseif (Get-Command pipx -ErrorAction SilentlyContinue) {
+        pipx install --force "git+$Repo"
+        if ($LASTEXITCODE -eq 0) { $installedWith = 'pipx (from git)' }
+    }
+    else {
+        & $py.Source -m pip install --user --force-reinstall "git+$Repo"
+        if ($LASTEXITCODE -eq 0) { $installedWith = 'pip --user (from git)' }
+        elseif (New-IsolatedVenv $Pkg $true) { $installedWith = 'pip (isolated venv, from git)' }
+    }
+}
+if (-not $installedWith) { Die "the install did not report a successful method — see the errors above (the package may not be published yet: try -FromGitHub)" }
 Info "installed via $installedWith"
 
 # ── PATH (user scope; merge, never overwrite) ───────────────────────────────
@@ -227,6 +247,11 @@ if ($Skill) {
             git clone --depth 1 --branch $Branch $Repo $dest --quiet 2>$null
             if ($LASTEXITCODE -eq 0) { Info "installed skill: $dest" } else { Warn "could not clone the skill into $dest" }
         }
+        # Register the bundle too. install.sh does (`register_install skill`), so a
+        # Windows -Skill run left the only record of the bundle to `installs scan`
+        # while the bash run recorded it -- `genome installs verify` then reported
+        # drift for a copy the operator had knowingly installed.
+        if ($genomeCmd) { reg_install 'skill' $dest 'via install.ps1 -Skill' }
     }
 }
 
@@ -237,6 +262,15 @@ Write-Host ''
 Write-Host '  genome init --profile software   # scaffold a knowledge genome'
 Write-Host '  genome wake                      # orient a fresh agent'
 Write-Host '  genome lint                      # check the roles and their mutability'
+Write-Host ''
+# The same gap install.sh had: an installed user asks how to get the next version,
+# and a uv/pipx tool cannot be upgraded by the CLI (`genome upgrade` only covers a
+# vendored copy). The installer is the update mechanism, so it must say so.
+Write-Host 'To update later, re-run this installer (it is idempotent):'
+Write-Host '  irm https://raw.githubusercontent.com/ishan-parihar/project-genome/main/install.ps1 | iex'
+Write-Host 'On Linux/macOS:  curl -fsSL https://raw.githubusercontent.com/ishan-parihar/project-genome/main/install.sh | bash'
+Write-Host ''
+Write-Host 'A repo that VENDORS scripts/genome updates that copy with: genome installs upgrade --apply'
 Write-Host ''
 if ($Skill) {
     Write-Host 'The skill bundle is installed too — agents pick up the methodology and references.'

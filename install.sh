@@ -206,6 +206,32 @@ if [ -z "$installed_with" ]; then
     warn "the CLI package could not be installed — installing the skill bundle anyway"
     CLI_UNMET=1
   else
+    # Every PyPI rung refused, which on this machine means the package is not
+    # published yet. When git is available, --from-github IS the working path on
+    # this very host, so take it instead of reporting a dead end and telling the
+    # operator to re-run with a flag (observed: the README one-liner exited 1 on a
+    # machine where the from-git install succeeds in one step - the advice
+    # repeated the failure instead of resolving it).
+    if command -v git >/dev/null 2>&1; then
+      warn "the package is not on PyPI yet — retrying from the Git repository"
+      if command -v uv >/dev/null 2>&1; then
+        uv tool install --force --from "git+$REPO" "$PKG" && installed_with="uv (from git)"
+        INSTALL_BIN_DIR="$(uv tool dir --bin 2>/dev/null || echo "$BIN_DIR")"
+      elif command -v pipx >/dev/null 2>&1; then
+        pipx install --force "git+$REPO" && installed_with="pipx (from git)"
+        INSTALL_BIN_DIR="$(pipx environment --value PIPX_BIN_DIR 2>/dev/null || echo "$BIN_DIR")"
+      elif try_pip_floor "git+$REPO" "from git"; then
+        installed_with="pip (from git)"
+      fi
+    fi
+  fi
+fi
+# Re-check after the retry: only a genuinely failed install is terminal now.
+if [ -z "$installed_with" ]; then
+  if [ "$SKIP_SKILL" = "0" ]; then
+    warn "the CLI package could not be installed — installing the skill bundle anyway"
+    CLI_UNMET=1
+  else
     die "the install did not report a successful method — see the errors above (the package may not be published yet: try --from-github)"
   fi
 else
@@ -360,6 +386,16 @@ else
   echo "  genome init --profile software   # scaffold a knowledge genome"
   echo "  genome wake                      # orient a fresh agent"
   echo "  genome lint                      # check the roles and their mutability"
+  echo ""
+  # An installed user's next question is 'how do I get the next version?' A uv/pipx
+  # tool cannot be upgraded by the CLI itself -- `genome upgrade` compares a
+  # VENDORED copy against the release ledger and says so explicitly -- so the
+  # answer is this installer, and the installer must be the one to say it.
+  echo "To update later, re-run this installer (it is idempotent):"
+  echo "  curl -fsSL https://raw.githubusercontent.com/ishan-parihar/project-genome/main/install.sh | bash"
+  echo "On Windows:  irm https://raw.githubusercontent.com/ishan-parihar/project-genome/main/install.ps1 | iex"
+  echo ""
+  echo "A repo that VENDORS scripts/genome updates that copy with: genome installs upgrade --apply"
   echo ""
   if [ "$SKIP_SKILL" = "0" ]; then
     echo "The skill bundle is installed too — agents pick up the methodology and references."
