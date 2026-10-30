@@ -76,3 +76,43 @@ worklog tail. Two prep items recorded: PQ-4 and PQ-5 in `TODO.md` are the traps 
 Also closed by this same pass: **README.md gained one line routing a contributor to `AGENTS.md` and
 `docs/RUNBOOK.md`** (PQ-7), which is the whole of the README change — the PyPI front page keeps its content.
 - **2026-10-30T17:09** — the execution outline, and the four measurements that re-ordered it
+- **2026-10-31T02:19** — the installer rework: one command delivers the CLI and the skill, as one canonical copy with links
+
+## 2026-10-31 — the install became one command that gives both halves
+
+The cold-start product was neither default. `install.sh` gave you the CLI and skipped the skill;
+`npx skills add` gave you the skill and skipped the CLI. On this machine that showed up as
+**four byte-identical 4.8 MB clones of one skill at four distinct inodes**, because the installer
+ran a separate `git clone` per harness root, and only the `~/.agents` one had a backup behind it.
+
+**What shipped** (`0d34558`): `install.sh` and `install.ps1` both install the skill the way
+`npx skills add -g` writes it, and one line (`.../install.sh | bash -s -- --skill`) delivers both.
+One real copy at `~/.agents/skills/project-genome`, a relative symlink in every other harness root
+that exists, and one entry in `~/.agents/.skill-lock.json` so `npx skills update` knows the copy's
+source. `--copy-skill` keeps the old real-copy-per-root behaviour for a harness that does not
+follow links.
+
+**Three things the sandbox caught that reading the code did not:**
+1. A fixed `../.agents/skills/..` link target resolves into `~/.claude/.agents/..` — a second broken
+   link. Computed per root depth now, and verified against `os.path.relpath` on all six roots.
+2. The lock file was first written *inside* `skills/`. Measured, the real one is
+   `~/.agents/.skill-lock.json`, one level **above** the root — where the npx CLI and the
+   skills-backup service both look.
+3. An empty `EXTRA_DIRS` still yields one empty word through the `${VAR+...}` guard, so `--dir ""`
+   pushed `""` into the roots list and `mkdir -p ""` failed on every run.
+
+**The honest limit, in-code not in a footnote:** our `skillFolderHash` is not the npx algorithm
+(a real entry re-derived: `86b6f36...`, ours `c3c8fba...`), so `npx skills update` re-fetches
+instead of skipping — the safe direction, and the entry still teaches the CLI where our copy
+lives, which it could not otherwise know.
+
+**Verified:** the real skill section run twice in a sandbox (one copy, five links, one lock entry;
+second run a no-op on all three, foreign lock entries preserved), the ps1 link algorithm against
+ground truth, `bash -n`, `check_ps1` green at 412 lines with four new parity guards, and
+`test_genome` 38/38, `test_package` 8/8, `test_package_modes` 5/5, `lint` clean.
+
+**Stale references corrected from measurement:** `docs/PUBLISHING.md`'s path table (its
+"CLI: yes (inside the skill)" claim was literally true and practically false — the skill ships a
+runnable `scripts/genome`, but nothing put a `genome` on PATH), the README install section, the
+RUNBOOK parity note, and the AGENTS loci table. The skills-root audit that ordered all of it is
+`docs/audit/2026-10-30-SKILLS-ROOT-AUDIT.md`.

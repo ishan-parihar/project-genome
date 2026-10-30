@@ -3,8 +3,43 @@
 Current snapshot only (no history: that is the worklog). The first `## ` block is
 what `genome wake` shows.
 
-## State — 2026-10-30, after the kernel repo was initialized as a genome project
+## State — 2026-10-30, after the installer rework made one command deliver both
 
+- **The cold-start install now delivers the CLI *and* the skill from one line.**
+  Measured before: `install.sh` installed the CLI and skipped the skill by default;
+  `npx skills add` installed the skill and skipped the CLI. Neither default was the
+  product. `curl -fsSL .../install.sh | bash -s -- --skill` is now both, and its
+  skill step writes the same shape `npx skills add -g` writes — verified in a
+  sandbox on 2026-10-30: **one real copy** at `~/.agents/skills/project-genome`, **five
+  relative links** (`.claude`, `.zcode`, `.codex`, `.codegpt`, opencode), **one
+  `.skill-lock.json` entry**, and the second run a no-op on all three.
+- **The four-clone defect is gone.** Measured on this machine 2026-10-30:
+  `project-genome` was **four byte-identical 4.8 MB clones at four distinct inodes**,
+  because the installer ran a separate `git clone` per harness root. Only
+  `~/.agents/skills/project-genome` was the copy the skills backup covers; the other
+  three had no second copy anywhere. The probe also missed two roots that exist
+  (`.codegpt`, `~/.config/opencode/skills`). Both are fixed, and the old behaviour is
+  still reachable with `--copy-skill`.
+- **Two installer defects were caught by running it, not by reading it.** The link
+  target was first written as a fixed `../.agents/skills/..`, which resolves to
+  `~/.claude/.agents/skills/..` — a second broken link. It is now computed per root
+  depth (`.claude` needs `../../`, opencode needs `../../../`), verified against
+  `os.path.relpath` on all six roots. And the lock file was first written inside
+  `skills/`; measured, the real one is `~/.agents/.skill-lock.json`, **one level
+  above** the root, which is where the npx CLI and the skills-backup service look.
+- **An honest limit is recorded in-code rather than papered over.** Our
+  `skillFolderHash` is not the npx algorithm (a real entry's hash re-derived against
+  ours: `86b6f36...` vs `c3c8fba...`), so `npx skills update` re-fetches rather than
+  skips. That is the safe direction, and the entry still tells the CLI this copy's
+  source — which is the part it could not otherwise learn.
+- **The lock file named 23 of 153 skills; ours was one of the 130 invisible.** The
+  installer now writes its entry, so `npx skills update` can refresh ours. The other
+  129 need the same one-line fix and are not this repo's to make.
+- **The skills-root audit is committed** (`docs/audit/2026-10-30-SKILLS-ROOT-AUDIT.md`):
+  six roots measured, the four-clone and lock-file gaps in prose, and the cleanup
+  ordered by what it unblocks. `~/.agents` is the canonical root because it is the
+  only gitsync-backed one; the others' 125/284 symlink chains already prove the
+  harnesses follow links, so the direction of travel is already right.
 - **This repo is now a genome-managed project.** Until today it was the one repo in the
   portfolio with **no `genome.toml` and no `AGENTS.md`** — a kernel that enforced
   `genome init` on every adopter without having run it on itself. Measured before the
