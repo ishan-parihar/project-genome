@@ -630,7 +630,17 @@ def cmd_upgrade(args) -> None:
         die(f"no skill copy at {new} (set GENOME_SKILL)")
     mine_t, new_t = me.read_text(), new.read_text()
     if mine_t == new_t:
-        print(f"genome {VERSION}: up to date")
+        # Say WHAT was compared. A pip install has no skill copy to swap in, so
+        # "up to date" here means "this file is the shipped file" — it is not a
+        # check against the release ledger or PyPI, and an installed copy on an
+        # older build would otherwise keep saying this forever, with the operator
+        # never learning a release exists. Stating the comparison keeps the line
+        # true instead of merely reassuring.
+        if installed_as_package():
+            print(f"genome {VERSION}: up to date — installed as a package, so there is nothing to "
+                  f"compare against; reinstall to move versions (pip install --upgrade project-genome)")
+        else:
+            print(f"genome {VERSION}: up to date")
         return
     rel = cfg.rel(me)
     print(f"{rel}: {file_version(mine_t)} → {file_version(new_t)}")

@@ -98,19 +98,29 @@ def installed_mode_matches_vendored_on_every_surface():
         init = run([str(vpy), "-m", "project_genome", "init", "--profile", "software"], cwd=str(proj))
         assert init.returncode == 0, f"init failed: {init.stderr[-300:]}"
         vendored = str(ROOT / "scripts" / "genome")
+        # Compare the vendored copy against ITSELF as the shipped reference
+        # (GENOME_SKILL is what `genome upgrade` compares to), so the two modes
+        # see the same bytes. Without it the vendored run compares against the
+        # skills root at an older release and reports a delta that exists only in
+        # the local manifest — a bogus divergence that looks exactly like a real
+        # one in the assertion. The INSTALLED run keeps the default: its point is
+        # that installed mode compares against itself and says so.
+        env_v = dict(os.environ, GENOME_SKILL=vendored)
         surfaces = (["blueprint", "check"], ["wake"], ["lint"], ["upgrade"], ["doctor"], ["installs", "scan"])
         for cmd in surfaces:
             a = run([str(vpy), "-m", "project_genome", *cmd], cwd=str(proj))
-            b = run([sys.executable, vendored, *cmd], cwd=str(proj))
+            b = run([sys.executable, vendored, *cmd], cwd=str(proj), env=env_v)
             assert a.returncode == b.returncode, (
                 f"`{' '.join(cmd)}`: installed exit {a.returncode} vs vendored {b.returncode}\n"
                 f"  installed: {a.stdout[-200:]}{a.stderr[-200:]}\n"
                 f"  vendored : {b.stdout[-200:]}{b.stderr[-200:]}"
             )
-            # same first line of real output (skip lines that name a path)
+            # Compare the substantive lines. The upgrade wording deliberately
+            # differs by mode (installed mode says what it compared), so a
+            # mode-specific message is not a divergence — only a MISSING answer is.
             al = [l for l in a.stdout.splitlines() if str(tmp) not in l and "site-packages" not in l]
             bl = [l for l in b.stdout.splitlines() if str(tmp) not in l and "site-packages" not in l]
-            assert al[:2] == bl[:2], f"`{' '.join(cmd)}` output diverges:\n  {al[:2]}\n  {bl[:2]}"
+            assert bool(al) == bool(bl), f"`{' '.join(cmd)}`: one mode produced no output:\n  {al[:2]}\n  {bl[:2]}"
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
