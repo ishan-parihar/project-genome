@@ -7,12 +7,14 @@
 #
 # Flags:
 #   -Skill        also install the skill bundle into the detected harness dirs
+#   -Dir <path>   extra skills root for -Skill (repeatable)
 #   -FromGitHub   install the CLI from the Git repo instead of PyPI
 #   -NoCta        skip the star/donate epilogue (also: $env:SKIP_CTA = '1')
 #   -ForceRoot    allow running as an elevated administrator
 
 param(
     [switch]$Skill,
+    [string[]]$Dir,
     [switch]$FromGitHub,
     [switch]$NoCta,
     [switch]$ForceRoot
@@ -20,6 +22,14 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
+
+# The bundle is a separate explicit step. Check its prerequisite HERE, at request
+# time: a git-less host that only learns this after the CLI rungs have run is a
+# host holding a partial install and a confusing tail — the same defect that was
+# fixed in install.sh. Refuse before anything is installed.
+if ($Skill -and -not (Get-Command git -ErrorAction SilentlyContinue)) {
+    Die "-Skill needs git to fetch the bundle — install git, install the CLI without -Skill, or run the CLI-only install and add the bundle later"
+}
 
 $Name = 'genome'
 $Pkg = 'project-genome'
@@ -168,13 +178,28 @@ $versionOut = & $genomeCmd.Source --version 2>&1
 if ($versionOut -notmatch '^genome ') { Die "the installed CLI did not run: $versionOut" }
 Info "verified: $versionOut ($($genomeCmd.Source))"
 
+# ── registry: record this install in the machine manifest ──────────────────
+# The same reason install.sh does it: the registry is what stops an upgrade from
+# leaving stragglers behind, and a pip/uv/pipx install is exactly the kind of copy
+# that otherwise goes untracked. `genome installs scan` finds what this misses.
+reg_install() {
+    param($Kind, $Path, $Note)
+    try {
+        & $genomeCmd.Source installs register $Kind $Path --note $Note *>$null
+        if ($LASTEXITCODE -eq 0) { Info "registered: $Path" } else { Warn "could not register $Path — `genome installs scan` will find it" }
+    } catch {
+        Warn "could not register $Path — `genome installs scan` will find it"
+    }
+}
+if ($genomeCmd) { reg_install 'bin' $genomeCmd.Source 'via install.ps1' }
+
 # ── skill bundle (optional) ─────────────────────────────────────────────────
 if ($Skill) {
-    if (-not (Get-Command git -ErrorAction SilentlyContinue)) { Die "-Skill needs git (install git, or drop -Skill)" }
     $roots = @()
     foreach ($d in @("$env:USERPROFILE\.agents\skills", "$env:USERPROFILE\.claude\skills", "$env:USERPROFILE\.codex\skills")) {
         if (Test-Path $d) { $roots += $d }
     }
+    foreach ($extra in $Dir) { if ($extra) { $roots += $extra } }
     if ($roots.Count -eq 0) {
         $roots = @("$env:USERPROFILE\.agents\skills")
         Info "no harness skills directory found — using $($roots[0])"
@@ -183,6 +208,18 @@ if ($Skill) {
         $dest = Join-Path $root $TargetName
         New-Item -ItemType Directory -Force -Path $root | Out-Null
         if (Test-Path (Join-Path $dest '.git')) {
+            # A checkout of this repo: fetch+reset is right for a skills root, and
+            # destructive inside a repo whose tree carries an uncommitted vendored
+            # scripts/genome — the same guard install.sh has, after the reset in
+            # operant's tree discarded a working-tree copy. Refuse rather than
+            # overwrite, and name the command that upgrades that copy properly.
+            $vendored = Join-Path $dest 'scripts\genome'
+            if ((Test-Path $vendored) -and (& git -C $dest diff --quiet -- scripts/genome; $LASTEXITCODE -ne 0)) {
+                Warn "$dest has its own uncommitted scripts/genome — not resetting it"
+                Warn "  inspect it with: git -C $dest diff -- scripts/genome"
+                Warn "  upgrade that copy with: genome installs upgrade --apply (from inside $dest)"
+                continue
+            }
             git -C $dest fetch origin $Branch --quiet; git -C $dest reset --hard "origin/$Branch" --quiet
             if ($LASTEXITCODE -eq 0) { Info "updated skill: $dest" } else { Warn "could not update $dest" }
         }
