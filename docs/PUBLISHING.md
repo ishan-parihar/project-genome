@@ -47,12 +47,24 @@ name as safe.
 
 ### Before publishing, verify it is really installable
 
+Run the whole chain, in this order, every time. The "already done, dist/ holds both
+artifacts" note above is about the FIRST build only: once `src/` moves — a peer
+commit, a VERSION bump — the artifacts in `dist/` are stale even though they
+install fine, and a stale wheel is exactly what `test_package.py`'s byte-parity
+assertion exists to catch.
+
 ```console
-python3 scripts/build.py           # builds scripts/genome AND records its release checksum
-uv build                           # packages the built file: sdist + wheel
-python3 scripts/test_package.py    # 8/8 — installs that wheel in a throwaway venv
-python3 scripts/test_genome.py     # 38/38 — the CLI itself
+python3 scripts/build.py             # builds scripts/genome AND records its release checksum
+uv build                             # re-packages: sdist + wheel (never skip when src/ moved)
+python3 scripts/test_package.py      # 8/8 — installs THAT wheel in a throwaway venv
+python3 scripts/test_genome.py       # 38/38 — the CLI itself
+python3 scripts/test_package_modes.py # 5/5 — the sdist path, every command in installed mode
+python3 scripts/check_ps1.py         # structural + cross-installer parity for install.ps1
 ```
+
+Confirm the wheel you are about to publish is the one just built: compare the
+`scripts/genome` checksum inside it against `scripts/releases.txt`, and the file
+mtime against your last commit. If either disagrees with the current tip, rebuild.
 
 `test_package.py` is the one that matters for a release: it installs the wheel
 (not the source tree), runs the console script and `python -m`, and asserts the
@@ -85,7 +97,7 @@ unreleased builds.
 ## Versioning
 
 `pyproject.toml`'s `version` is the **distribution** version (currently
-`0.1.0`); the CLI prints its own VERSION stamp (`2026.10.29-21`, in
+`0.1.0`); the CLI prints its own VERSION stamp (`2026.10.30-23`, in
 `src/01_constants.py`), which is what `genome upgrade` compares between a
 vendored copy and a release. They are deliberately different: the CLI version
 moves with every change, the distribution version moves on public releases.
