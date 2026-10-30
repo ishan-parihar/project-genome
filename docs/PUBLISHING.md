@@ -45,6 +45,21 @@ has the project pre-claimed — the one-time verification step PyPI shows on a n
 project is what makes the name permanently yours. Do that before treating the
 name as safe.
 
+### Before publishing, verify it is really installable
+
+```console
+python3 scripts/build.py           # builds scripts/genome AND records its release checksum
+uv build                           # packages the built file: sdist + wheel
+python3 scripts/test_package.py    # 8/8 — installs that wheel in a throwaway venv
+python3 scripts/test_genome.py     # 38/38 — the CLI itself
+```
+
+`test_package.py` is the one that matters for a release: it installs the wheel
+(not the source tree), runs the console script and `python -m`, and asserts the
+byte parity between the packaged CLI and the `scripts/genome` the fleet vendors
+— which is what `genome upgrade`'s release-checksum comparison is built on. A
+release that ships without it could publish a package whose CLI is a stale copy.
+
 ## After publishing
 
 ```bash
