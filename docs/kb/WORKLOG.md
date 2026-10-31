@@ -2,6 +2,56 @@
 
 Append-only: `python3 scripts/genome log "<entry>"`, one per unit of work.
 
+## 2026-10-31 — one verb instead of three commands joined by path (`5b9f0f9`, VERSION `2026.10.31-34`)
+
+The ask, verbatim: *a unified surface area from where we can link all our kbs and upgrade
+it effectively, rather than manual search and upgrade of each kb.* Measured first (nothing
+was taken from the register): the `genome` on PATH was `~/.local/bin/genome`, a uv-tool
+package whose real CLI sits inside the environment at
+`lib/python3.13/site-packages/project_genome/_genome.py`; four skills roots at
+`2026.10.30-22`; the kernel at `2026.10.30-29`; 77 vendored copies of which 74 were at
+`2026.10.27-13`. **Five gaps, each an existing correct mechanism stopping at a boundary:**
+
+1. The installed package **compared itself and printed "up to date"**, and `installs
+   verify` read its bin row as `?`, because resolving the symlink lands on a
+   console-script stub with no VERSION line.
+2. An installed package's staleness had **no reference from outside itself** to compare
+   against, and from a neutral cwd the command died in `find_cfg()` before checking
+   anything.
+3. `kb list` had **no version column**, so it could not answer "which are behind".
+4. `kb lint --all` capped findings at three and **printed no remedy**, so 100 fleet
+   warnings appeared as bare counts.
+5. Three parts of one job lived in **three commands with three geometries**.
+
+Fixes: `_script_of()` probes the package environment; `_package_reference()` +
+`_package_upgrade()` measure an install against the skills roots and the kernel checkout;
+`kb list` gains versions and `behind <ref>`; `kb_lint_one()` returns every finding and
+`_remedies_for()` — now the single owner of the code→command table, shared with
+`_post_upgrade_findings()` — prints the remedies and the KBs carrying each code; and
+`genome fleet {list,upgrade,lint}` joins the three parts with no new machinery.
+
+**Two defects in my own work, caught by measurement and by its tests:**
+
+- The first remedy table knew only the **E** codes, and the estate carries 100 warnings in
+  nine **W** codes, so the first `fleet lint` printed no remedies at all. Same failure
+  shape as the cap: the answer withheld by the caller.
+- A registry-row probe that asked for "AGENTS.md" matched `saas/lifeos-bot` (AGENTS.md, no
+  `src/`), so the package was measured against a `-29` peer instead of the release it would
+  converge on. **The kernel was not registered at all**, so no manifest reader could see
+  the newest copy on the machine — the real root cause, fixed by registering it and by
+  probing the kernel from the running file's own tree.
+
+**Four ghost rows** (holon-personal and its nested holon, discord-cli, tg-cli — directories
+that no longer exist) were inflating every count and appearing as "no local CLI"; the new
+fleet surface made them visible and `installs unregister` removed them.
+
+Suites at `-34`: test_genome 38/38 (kb_registry asserts the package layout, the version
+column and the behind group, and fails on a scratch revert with `version: '?'`),
+test_package 8/8, test_package_modes 5/5, check_ps1 412 lines; wheel bytes ==
+`scripts/genome`; kernel lint clean, doctor healthy. A scoped `--roots` dry run reached
+2 of 2 named repos on the `-34` source, and a scope matching nothing still dies rather
+than print the all-clear. No fleet-wide `--apply`: that pass is the operator's call.
+
 ## 2026-10-30 — the kernel repo stops being the one repo without a genome (this)
 
 The gap this closes: **the skill that enforces `genome init` on every adopting project had
