@@ -5,6 +5,7 @@ Run: python3 scripts/test_genome.py [case ...]   (stdlib only; every case builds
 Every selected case runs even when one fails; the summary lists them all and the exit code is 1 on any failure.
 """
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -1555,6 +1556,19 @@ def installs_registry(root: Path) -> None:
     run(root, "installs", "register", "vendored", str(stale_copy), env=env)
     r = run(root, "installs", "verify", "--against-shipped", ok=False, env=env)
     assert r.returncode == 2 and "BEHIND" in r.stdout and str(stale_copy) in r.stdout, (r.returncode, r.stdout)
+    # THE RUNNING CLI IS THE REFERENCE FLOOR, NOT THE PUBLISH SNAPSHOT. A skills root at
+    # an older release must not drag the reported target backwards: measured 2026-10-31,
+    # the four real roots were one release behind the running CLI and this check printed
+    # "shipped is 2026.10.30-22" — naming a shipped version nobody held. The running CLI
+    # wins, so make the roots lag and assert the reference does not follow them down.
+    running_v = re.search(r'^VERSION = "([^"]+)"', Path(G).read_text(), re.M).group(1)
+    lagged = sk / "scripts" / "genome"
+    original = lagged.read_text()
+    lagged.write_text(original.replace('VERSION = "2026.', 'VERSION = "2024.'))
+    r2 = run(root, "installs", "verify", "--against-shipped", ok=False, env=env)
+    assert f"shipped is {running_v}" in r2.stdout, ("the reference followed a lagging root", r2.stdout)
+    assert "BEHIND" in r2.stdout and str(sk) in r2.stdout, ("a lagging skill root was not reported", r2.stdout)
+    lagged.write_text(original)
     # the default verify is UNCHANGED: the older vendored copy matches its own record
     assert "all" in run(root, "installs", "verify", env=env).stdout
     run(root, "installs", "register", "bin", str(bin_dir / "genome"), env=env)

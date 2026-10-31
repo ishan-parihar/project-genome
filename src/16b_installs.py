@@ -66,9 +66,10 @@ def _version_key(v: str) -> tuple:
 def _verify_against_shipped(rows: list) -> None:
     """The check the registry clause actually needs: every registered install against the
     SHIPPED reference, not against its own registration record. The reference is the
-    freshest live version among the skill/bin rows — those are the copies install.sh
-    manages, so by construction they are (or were just made) current. A row whose live
-    version is older is BEHIND and listed with the delta; a row whose version is not
+    freshest live version among the skill/bin rows — the copies install.sh manages —
+    RAISED to the running CLI's own VERSION, because those rows are only as current as
+    the last publish while the repo under development is by definition newer. A row whose
+    live version is older is BEHIND and listed with the delta; a row whose version is not
     comparable (a fork with a local stamp) is reported UNKNOWN rather than silently
     green. Exit 2 when anything is behind: 'all upgrades are seamless' has to start
     with knowing which copies are behind."""
@@ -78,6 +79,18 @@ def _verify_against_shipped(rows: list) -> None:
         die("no skill/bins copy registered to use as the shipped reference — run install.sh "
             "or `genome installs register skill <root>` first", ERR)
     ref = max(refs, key=_version_key)
+    # Same correction the dispatch needed (2026-10-31, commit for `2026.10.30-25`): the
+    # registered floor is a PUBLISH-TIME snapshot, so on a development day it is one
+    # release behind the CLI actually running, and this check then calls every copy "at
+    # the shipped version" for a shipped version that no longer exists. Measured: the
+    # four skill roots are at `2026.10.30-22`, the running CLI at `-25`, and this command
+    # printed "shipped is 2026.10.30-22" — so an operator reading it learned the wrong
+    # target. The running CLI wins for the same reason it wins in `_dispatch_upgrade`: it
+    # is the newest thing the operator can name, and the floor still prevents dragging a
+    # repo backwards from an older checkout.
+    me = _file_version(Path(__file__).read_text())
+    if _version_key(me) > _version_key(ref):
+        ref = me
     behind, unknown = [], []
     for r in rows:
         v = live[r["path"]]

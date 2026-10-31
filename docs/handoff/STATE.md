@@ -3,12 +3,12 @@
 Current snapshot only (no history: that is the worklog). The first `## ` block is
 what `genome wake` shows.
 
-## State — 2026-10-31, after the upgrade mechanism was made honest and the scoped test became possible
+## State — 2026-10-31, after the upgrade mechanism was made honest and the scoped test became possible (`2026.10.30-26`)
 
 - **The fleet is 77 vendored CLI files across 77 repos, and 75 of them sit at
   `2026.10.27-13`** — ten releases behind the tip. The four skills roots sit at
   `2026.10.30-22`, one release behind the kernel (`2026.10.30-25`). A `-13 → -25` swap
-  is **807 lines added, 6 removed** per copy. The registry knows every vendored repo:
+  is **820 lines added, 6 removed** per copy. The registry knows every vendored repo:
   79 of its 81 vendored/kb rows resolve to a real directory and 77 hold `scripts/genome`,
   exactly the on-disk set. Two rows point at nothing (`holon-personal` and its nested twin).
 - **The upgrade mechanism had ten gaps, and the operator's sanctioned scoped test was
@@ -31,10 +31,15 @@ what `genome wake` shows.
   `--roots no-such-repo` used to print `dispatch: nothing to upgrade (every registered
   copy is at …)` — the single most dangerous line the mechanism can produce, because the
   operator reading it concludes the fleet is current.
+- **The same stale-floor defect was in a sibling command, and is fixed there too.**
+  `genome installs verify --against-shipped` printed `shipped is 2026.10.30-22` while the
+  running CLI was `-26` — the check an operator reads before a rollout named a version
+  nothing held. It now takes `max(running CLI, registered floor)`, and `installs_registry`
+  asserts it by making a skills root lag: the reference must not follow a root down.
 - **The registry can now forget.** `genome installs unregister <path>` is new: exact path
   first, then an unambiguous name match. `project-genome` is refused (it matches 4 rows)
   rather than dropping rows the operator never named.
-- **All suites green at `2026.10.30-25`:** `test_genome` 38/38, `test_package` 8/8,
+- **All suites green at `2026.10.30-26`:** `test_genome` 38/38, `test_package` 8/8,
   `test_package_modes` 5/5, `check_ps1` parity ok at 412 lines, `genome close` green,
   and the wheel bytes equal `scripts/genome` bytes equal the ledger's `-25` checksum.
 - **Three packaging failures were a stale `dist/`, not a code defect.** Both artefacts

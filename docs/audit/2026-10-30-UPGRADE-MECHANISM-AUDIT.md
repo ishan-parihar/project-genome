@@ -205,3 +205,41 @@ Steps 1 and 4 are the operator's call. **No `--apply` has been run on any repo.*
 - The earlier session summary recorded "11 releases separate `-13` from `-23`". The
   correct count measured from `releases.txt` is **10** (`-14` through `-23`); 11 reaches
   `-24`. Corrected here rather than carried forward.
+
+## Re-measured 2026-10-31, 07:20 — a sixth fix, a new build, and one rule broken on the way
+
+The audit was published inside the same session that wrote it, so the tables above are
+the `2026.10.30-25` snapshot. Two moves happened after it, and they are recorded here
+rather than by editing the body — a dated-frozen audit that changes under the reader is
+worse than one that is stale with the date attached.
+
+| figure | published 2026-10-30 (`-25`) | re-measured 2026-10-31 (`-26`) | what moved |
+|---|---|---|---|
+| the build | `2026.10.30-25`, 6,970 lines | **`2026.10.30-26`, 6,983 lines** | the sixth fix below, and the ERROR-line remedy from G9 |
+| release gap from `-13` | 11 to `-25` | **12 to `-26`** | one more release; and `-24` was minted then withdrawn, so the version enumeration is not contiguous |
+| per-copy delta | 802 added / 6 removed | **820 added / 6 removed** | the same `saas/lifeos-bot` copy re-measured against the new build (13 of the extra lines are the G9 remedy) |
+| fixes | five | **six** | `installs verify --against-shipped` had the same stale-reference defect as the dispatch |
+| suites | `test_genome` 38/38 | **38/38** with one new assertion inside `installs_registry` | the reference-floor property is now asserted, not just claimed |
+
+**The sixth fix is the fifth gap in a second location.** `genome installs verify
+--against-shipped` computed `shipped is …` from the registered skill/bin floor and
+printed `shipped is 2026.10.30-22` while the running CLI was at `-26` — so the check an
+operator reads *before* a rollout named a version nothing on the machine held. It is the
+same defect as G8 in the dispatch, which is the useful part of the finding: a reference
+resolved from a publish-time snapshot is wrong everywhere it appears, so the fix belongs
+to one place (`max(running CLI, registered floor)`) and was applied in both. The
+`installs_registry` case now asserts it by making a skills root lag and checking the
+reported reference does not follow it down.
+
+**G9's remedy also tightened.** The published fix printed the child's first output line,
+which is empty when the child dies silently. It now prints `exit N (no output — run it
+directly: <command>)` in that case, because a bare `1` is not a reason.
+
+**One rule was broken while correcting the previous session's entry and the repair is
+part of the record.** `docs/kb/WORKLOG.md` is append-only; three lines of the committed
+entry were rewritten in place to update the version figures, and `genome doctor` named
+it — "append-only violation: 8 line(s) removed from docs/kb/WORKLOG.md in the working
+tree". The entry was restored from `e164018` and the corrections were appended as new
+dated lines instead. That is the only mutation the form allows, and it is why this
+section exists in a dated-frozen audit rather than as edits above: a correction is a new
+line with its own timestamp, never a rewrite of the one already published.
