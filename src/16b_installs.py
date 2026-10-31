@@ -279,16 +279,26 @@ def _dispatch_upgrade(rows: list, apply: bool, roots: list | None = None) -> Non
             print(f"{'upgraded' if apply else 'would upgrade':14} {r['path']}  {v} → {ref}")
             # The new lint output is part of the result, not noise: a fleet run that
             # prints only the version line leaves every post-upgrade fix list unread.
-            for line in out.splitlines()[:1]:
-                print(f"        {line}")
-            for line in out.splitlines():
+            # The header is the line an operator scans for, so it is named explicitly
+            # rather than left to a numbered-line heuristic that would miss it.
+            # Skip the first line: it is the child's own `path: a -> b` header, which the
+            # dispatch already prints on its own target line above. Printing it twice is
+            # how the duplicate `genome.toml: schema_version ...` line appeared.
+            for line in out.splitlines()[1:]:
                 s = line.strip()
-                if s.startswith("lint:") or s.startswith("genome.toml:"):
+                if not s:
+                    continue
+                if (s.startswith("lint:") or s.startswith("genome.toml:")
+                        or s.startswith("post-upgrade:") or s.startswith("remedies:")
+                        or s.startswith("after fixing:")):
                     print(f"        {s}")
+            # The numbered findings themselves: `  1. E017 genome.toml: ...` — strip the
+            # leading spaces and the `N. ` prefix is the marker. Capped at 5 because
+            # lint output is read by agents and every line costs.
             shown = 0
             for line in out.splitlines():
                 s = line.strip()
-                if s[:1].isdigit() and ". [" in s[:8] and shown < 5:
+                if re.match(r"^\d+\. ", s) and shown < 5:
                     print(f"        {s}")
                     shown += 1
         elif "local edits" in out or "patch" in out.lower():

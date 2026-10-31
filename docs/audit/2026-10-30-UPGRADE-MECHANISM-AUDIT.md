@@ -243,3 +243,41 @@ tree". The entry was restored from `e164018` and the corrections were appended a
 dated lines instead. That is the only mutation the form allows, and it is why this
 section exists in a dated-frozen audit rather than as edits above: a correction is a new
 line with its own timestamp, never a rewrite of the one already published.
+
+## Re-measured 2026-10-31, 08:20 — the scoped `--apply` ran, and it found three defects in the fix
+
+The operator's two standing conditions for the fleet pass are a dry run before every
+`--apply`, and nothing beyond a scoped run on this machine. Both held. This section
+records what the first real `--apply` proved, because it changed three things the audit
+above had already declared done.
+
+**The scoped run was performed on `saas/lifeos-bot`, twice.** The first swapped it from
+`2026.10.27-13` (its vendored state) to `2026.10.30-28`; the second took it to `-29`. Its
+post-upgrade line reads `lint: clean [agents, core, records] — nothing to fix after the
+upgrade`, and `genome doctor` there reports healthy. Its vendored copy carried a local
+patch measured at **292 changed lines against its `2026.10.22-17` HEAD, and that patch
+was the `outline` module** — which `-22` had already shipped upstream. The swap therefore
+subsumed the local work rather than dropping it: the working tree now differs from its
+HEAD only by the releases HEAD never had, and `genome upgrade --apply` never refused
+because there was nothing left to lose. The change is left **uncommitted for the repo
+owner**, as every peer repo's vendored delta is.
+
+**Three defects in the previous section's fix were found by the live run, not by reading:**
+
+| what the operator would have seen | why | fixed at |
+|---|---|---|
+| no fix list at all, in a fleet run | the dispatch's own line filter printed the child's first line and any `lint:`/`genome.toml:` line — so the `post-upgrade:` header and the `remedies:` line were **dropped on the floor** | `2026.10.30-29` |
+| the numbered findings missing | they were matched by a heuristic (`s[:8]` contains `". ["`) that `1. E017 …` cannot satisfy | `2026.10.30-29` |
+| `genome.toml: schema_version 2 (nothing to migrate)` printed **twice** | the child's first line was printed once on its own and again by the `genome.toml:` filter | `2026.10.30-29` |
+
+Each was verified by a sandbox proof re-run after the fix, and the regression is now
+asserted in `test_genome.py`'s `kb_registry` case: an `--apply` whose KB holds an E017,
+with assertions on the header, the remedy line, the numbered finding, and the absence of
+the duplicate. **The assertion was proved to catch the defect** by reverting the
+passthrough in a scratch copy and watching it fail — a test that has not been seen to
+fail is a claim, not a check.
+
+The generalisation this section records: **a mechanism whose job is to report findings is
+not verified by the diff that adds the reporting code.** All three lines above existed in
+the source before the live run; only running it showed they were filtered away between
+the child's stdout and the operator's screen.

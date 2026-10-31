@@ -1498,6 +1498,26 @@ def kb_registry(root: Path) -> None:
     # fleet is converging toward, and a lagging root is the failure this dispatch
     # exists to prevent (a -23 run converging the fleet on -22 looked like success)
     assert "swap source:" in d.stdout or "the swap source is" in d.stdout, d.stdout
+    # THE FIX LIST MUST SURVIVE THE DISPATCH. `--apply` and assert the post-upgrade
+    # findings reach the operator through the dispatcher, not just through the child run
+    # directly: measured 2026-10-31, the dispatcher's own line filter dropped the
+    # `post-upgrade:` header, matched no numbered finding, and printed the child's first
+    # line twice — so a fleet run showed no fix list at all. A mechanism that reports its
+    # own findings is not proven until something prints them.
+    import subprocess as _sp
+    target = old / "scripts" / "genome"
+    kept_text = target.read_text()
+    (old / "genome.toml").write_text('[genome]\nmodules = ["core"]\nnonsense_key = 1\n')  # E017: deterministic
+    ap = _sp.run([sys.executable, G, "installs", "upgrade", "--roots", str(old), "--apply"],
+                 capture_output=True, text=True, cwd=str(root), env={**os.environ, **env})
+    target.write_text(kept_text)
+    assert ap.returncode == 0, (ap.returncode, ap.stdout, ap.stderr)
+    body = ap.stdout
+    assert "upgraded" in body and str(old) in body, body
+    assert "post-upgrade:" in body, ("the fix-list header was filtered out", body)
+    assert "remedies:" in body, ("the remedy line was filtered out", body)
+    assert re.search(r"^\s*1\. E017", body, re.M), ("the numbered finding was filtered out", body)
+    assert body.count("genome.toml: schema_version") <= 1, ("the child's first line printed twice", body)
 
 
 @case

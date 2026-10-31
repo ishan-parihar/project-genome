@@ -3,14 +3,15 @@
 Current snapshot only (no history: that is the worklog). The first `## ` block is
 what `genome wake` shows.
 
-## State — 2026-10-31, after the upgrade mechanism was made honest and the scoped test became possible (`2026.10.30-26`)
+## State — 2026-10-31, after the upgrade mechanism was proved by a real scoped `--apply` (`2026.10.30-29`)
 
-- **The fleet is 77 vendored CLI files across 77 repos, and 75 of them sit at
-  `2026.10.27-13`** — ten releases behind the tip. The four skills roots sit at
-  `2026.10.30-22`, one release behind the kernel (`2026.10.30-25`). A `-13 → -25` swap
-  is **820 lines added, 6 removed** per copy. The registry knows every vendored repo:
-  79 of its 81 vendored/kb rows resolve to a real directory and 77 hold `scripts/genome`,
-  exactly the on-disk set. Two rows point at nothing (`holon-personal` and its nested twin).
+- **The fleet is 77 vendored CLI files across 77 repos, and 76 of them sit at
+  `2026.10.27-13`** — twelve releases behind the tip; `saas/lifeos-bot` is the one that
+  moved. The four skills roots sit at `2026.10.30-22`, one release behind the kernel
+  (`2026.10.30-29`). A `-13 → -29` swap is **820 lines added, 6 removed** per copy. The
+  registry knows every vendored repo: 79 of its 81 vendored/kb rows resolve to a real
+  directory and 77 hold `scripts/genome`, exactly the on-disk set. Two rows point at
+  nothing (`holon-personal` and its nested twin).
 - **The upgrade mechanism had ten gaps, and the operator's sanctioned scoped test was
   impossible to perform.** `--roots` was parsed and then ignored (the dispatch body had
   zero references to it), so every "scoped" run was a fleet run by another name. Verified
@@ -39,20 +40,31 @@ what `genome wake` shows.
 - **The registry can now forget.** `genome installs unregister <path>` is new: exact path
   first, then an unambiguous name match. `project-genome` is refused (it matches 4 rows)
   rather than dropping rows the operator never named.
-- **All suites green at `2026.10.30-26`:** `test_genome` 38/38, `test_package` 8/8,
-  `test_package_modes` 5/5, `check_ps1` parity ok at 412 lines, `genome close` green,
-  and the wheel bytes equal `scripts/genome` bytes equal the ledger's `-25` checksum.
+- **All suites green at `2026.10.30-29`:** `test_genome` 38/38 (one new assertion
+  in `kb_registry`), `test_package` 8/8, `test_package_modes` 5/5, `check_ps1` parity ok
+  at 412 lines, `genome close` green, and the wheel bytes equal `scripts/genome` bytes
+  equal the ledger's `-29` checksum.
 - **Three packaging failures were a stale `dist/`, not a code defect.** Both artefacts
   still carried `-23` mid-session and the byte-parity cases failed until `uv build` was
   re-run. A `build.py` guard also refused to rewrite a released checksum, which forced
   the VERSION bump that uncovered the stale-artefact path — two independent guards
   working. The unshipped `-24` ledger line was removed: no file on disk ever held those
   bytes.
-- **Nothing was applied to the fleet.** No `--apply` on any repo, no publish, no
-  fleet-wide run. The procedure is written down in
-  `docs/audit/2026-10-30-UPGRADE-MECHANISM-AUDIT.md`; its steps 1 and 4 are the
-  operator's call. That audit also records a corrected figure: the release gap is **10**
-  releases, not the eleven the previous session summary carried.
+- **One scoped `--apply` WAS run, on `saas/lifeos-bot`, twice, each after its dry
+  run.** `2026.10.27-13` → `-28` → `-29`; its post-upgrade line reads `lint: clean
+  [agents, core, records] — nothing to fix after the upgrade` and `genome doctor` there
+  is healthy. Its 292-line local patch was the `outline` module, which `-22` had already
+  shipped upstream, so the swap subsumed it and lost nothing. Its `scripts/genome`
+  working-tree change is left uncommitted for the repo owner.
+- **The live run found three defects in the fix, all fixed at `-29`.** The dispatch's own
+  line filter dropped the `post-upgrade:` header and the `remedies:` line — a fleet run
+  would have shown NO fix list; the numbered findings were matched by a heuristic
+  `1. E017 …` cannot satisfy; and the child's first line printed twice. All three are
+  asserted in `kb_registry`, and the assertion was proved to catch the defect by
+  reverting the passthrough in a scratch copy and watching it fail.
+- **Nothing else was applied.** No publish, no fleet-wide run: the remaining 74 vendored
+  copies still sit at `2026.10.27-13`, and the procedure that would take them is in
+  `docs/audit/2026-10-30-UPGRADE-MECHANISM-AUDIT.md` §6.
 
 ## State — 2026-10-30, after the installer rework made one command deliver both
 
