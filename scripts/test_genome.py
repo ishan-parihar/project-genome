@@ -1452,6 +1452,44 @@ def kb_registry(root: Path) -> None:
     noclirow = [r for r in rows if r["path"] == str(kb_nocli)][0]
     assert noclirow["version"] == "none", noclirow
 
+    # THE PACKAGE LAYOUT: a bin console-script stub carries no VERSION line, and the
+    # real CLI sits beside it in the environment at lib/python*/site-packages/*/_genome.py.
+    # Measured 2026-10-31 on the host, the registry read its bin row as '?' while that
+    # file was `2026.10.30-23`, one release ahead of every skills root — so the only
+    # aggregate a fleet view could be built on reported its own install as unknown.
+    envdir = root / "tool"; (envdir / "bin").mkdir(parents=True)
+    (envdir / "lib" / "python3.13" / "site-packages" / "project_genome").mkdir(parents=True)
+    (envdir / "bin" / "genome").write_text(
+        "#!/usr/bin/env python3\nimport sys\nfrom project_genome import main\nsys.exit(main())\n")
+    (envdir / "lib" / "python3.13" / "site-packages" / "project_genome" / "_genome.py").write_text(
+        Path(G).read_text())
+    run(root, "installs", "register", "bin", str(envdir / "bin" / "genome"), env=env)
+    pkgrow = [r for r in json.loads(man.read_text())["installs"] if r["path"] == str(envdir / "bin" / "genome")][0]
+    assert pkgrow["version"] not in ("?", "none", "missing"), pkgrow
+    # a VERSION-CARRYING bin (pioneer-qf's vendored copy) is left untouched: this must
+    # not swallow a real CLI on its way to the package probe
+    assert kb_bin.joinpath("bin", "genome").is_file()
+
+    # THE FLEET SURFACE: one view that answers what is behind, by KB label. The ask was
+    # three commands in three geometries joined by path; `fleet` is one of them. The
+    # fixture is pinned one release older, because a fleet of copies at the running
+    # version prints "current" for everything and would leave the group untested.
+    cur = re.search(r'^VERSION = "([^"]+)"', Path(G).read_text(), re.M).group(1)
+    prev = re.sub(r"-\d+$", lambda m: f"-{int(m.group(0)[1:]) - 1}", cur)
+    kb_bin.joinpath("bin", "genome").write_text(
+        Path(G).read_text().replace(f'VERSION = "{cur}"', f'VERSION = "{prev}"', 1))
+    fl = run(root, "fleet", env=env)
+    assert "current release" in fl.stdout, fl.stdout
+    assert "behind (1)" in fl.stdout, f"fleet must name the behind count: {fl.stdout}"
+    assert "bin-kb" in fl.stdout, f"a KB label must appear: {fl.stdout}"
+    # the version column is on every row, which is what makes the list answer
+    # "which are behind" in the same glance as "where are they"
+    kbl = run(root, "kb", "list", env=env)
+    assert f"{prev}  behind {cur}" in kbl.stdout, f"kb list must show the version and the gap: {kbl.stdout}"
+    # restore it: the dispatch's target assertion below needs a copy that is NOT behind
+    kb_bin.joinpath("bin", "genome").write_text(Path(G).read_text())
+    run(root, "installs", "register", "kb", str(kb_bin), env=env)
+
     # REACHABLE FROM ANYWHERE: resolve a KB by name from an unrelated cwd
     away = root / "elsewhere"; away.mkdir()
     sh = run(away, "kb", "show", "bin-kb", env=env)

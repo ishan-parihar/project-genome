@@ -660,27 +660,126 @@ def file_version(text: str) -> str:
     return m.group(1) if m else "?"
 
 
+def _package_reference() -> Path | None:
+    """The release an INSTALLED package should be measured against, or None when there is none.
+
+    An installed package is the shipped copy of its install, so comparing it against
+    itself can only ever print "up to date" — measured 2026-10-31, the genome on PATH
+    said exactly that while sitting six releases behind the kernel, so no release was
+    discoverable from the one command whose job is to say so. The comparison is still
+    useful, but the reference has to come from OUTSIDE the package.
+
+    Those roots are probed directly rather than through `skill_copy()`, which returns
+    the running file when it detects an installed package — the very answer that
+    produced the false all-clear. Two sources are compared, not one, because the honest
+    definition of "current" is what the operator would converge on:
+
+      * the newest skills root, refreshed at publish time;
+      * the kernel checkout's working tree, which is ahead of the roots on exactly
+        the days a package goes stale. Measured 2026-10-31: the running kernel was
+        `-30`, the roots `-22`, and a package at `-23` is behind BOTH definitions
+        of current by a different amount — so naming only the root understates it.
+
+    `GENOME_SKILL` still wins outright, because an operator who names a reference has
+    named it."""
+    env = os.environ.get("GENOME_SKILL")
+    if env:
+        p = Path(env).expanduser()
+        return p if p.is_file() else None
+    cands = [
+        Path("~/.agents/skills/project-genome/scripts/genome").expanduser(),
+        Path("~/.claude/skills/project-genome/scripts/genome").expanduser(),
+        Path("~/.zcode/skills/project-genome/scripts/genome").expanduser(),
+        Path("~/.codex/skills/project-genome/scripts/genome").expanduser(),
+    ]
+    # The kernel checkout: where the operator develops, so it is ahead of the roots on
+    # exactly the days a package goes stale. Probed from the RUNNING FILE's own tree —
+    # a vendored copy sits in scripts/genome beside src/NN_*.py — and kept as a plain
+    # candidate rather than a winner, because on the neutral cwd where a package run
+    # happens most, walking up from the cwd finds nothing. Measured 2026-10-31: an
+    # earlier registry-row probe that asked only for "AGENTS.md" matched
+    # `saas/lifeos-bot` (an AGENTS.md with no src/), so the package was measured
+    # against a `-29` peer instead of the release it would actually converge on.
+    for base in (Path(__file__).resolve().parent, Path.cwd()):
+        for up in (base, *base.parents):
+            if (up / "AGENTS.md").is_file() and any(up.glob("src/[0-9][0-9]*_*.py")):
+                cands.append(up / "scripts" / "genome")
+                break
+    # The registry's vendored rows too, so a machine whose kernel checkout sits
+    # outside both the running file's tree and the cwd still reports the newest
+    # installed genome rather than only the skills roots.
+    for r in load_installs()["installs"]:
+        if r.get("kind") != "vendored":
+            continue
+        p = Path(r["path"]) / "scripts" / "genome"
+        if p.is_file() and _file_version(p.read_text(errors="replace")) != "-":
+            cands.append(p)
+    best, best_v = None, "-"
+    for c in cands:
+        if not c.is_file():
+            continue
+        v = _file_version(c.read_text())
+        if best is None or _version_key(v) > _version_key(best_v):
+            best, best_v = c, v
+    return best
+
+
+def _package_upgrade(me: Path) -> None:
+    """Report an installed package's staleness against what it would converge on.
+
+    `skill_copy()` returns the running file when it detects an install, so the ordinary
+    comparison path compares the package against itself and can only print "up to
+    date" — that is the lie the operator must never see, and the genome on PATH was
+    printing it six releases deep. The reference is probed outside the package
+    (skills roots and the kernel checkout), and the answer names the reinstall command
+    that actually closes it, because there is no file for an installed package to swap.
+
+    Never exits non-zero: the package is a working tool, and a gate failure here would
+    tell a caller the machine is broken when it is simply one release behind."""
+    ref = _package_reference()
+    mine = _file_version(me.read_text())
+    if ref is None:
+        print(f"genome {mine}: up to date — installed as a package, and no skills root on this "
+              f"machine to compare against; reinstall to move versions")
+        return
+    want = _file_version(ref.read_text())
+    if _version_key(mine) < _version_key(want):
+        print(f"genome {mine}: BEHIND — this machine is at {want}")
+        print(f"      {ref}")
+        print(f"      this package is the genome on PATH; move it with "
+              f"`uv tool install --force project-genome` (or "
+              f"`pip install --upgrade project-genome`)")
+        print(f"      then `genome fleet lint` shows what each KB needs fixed")
+        return
+    print(f"genome {mine}: up to date ({ref} is {want})")
+
+
 def cmd_upgrade(args) -> None:
     """Compare this repo's vendored CLI with the skill's copy; --apply swaps it in, keeping a backup and any local patch as a diff."""
     import difflib
+    me = Path(__file__).resolve()
+    # AN INSTALLED PACKAGE IS MEASURED AGAINST WHAT IT WOULD CONVERGE ON, NOT ITSELF,
+    # AND THE CHECK RUNS BEFORE find_cfg(). `skill_copy()` returns the running file when
+    # it is an install, so `upgrade` compared the file against itself and could only
+    # print "up to date" — the genome on PATH said that while six releases behind the
+    # kernel. Ordering, not just comparison, was the defect: from a neutral cwd the
+    # command died in find_cfg with "no genome.toml upward of cwd" before any staleness
+    # check ran, so the one command that reports the package's version answered a
+    # different question entirely unless the operator happened to be inside a KB.
+    if installed_as_package():
+        _package_upgrade(me)
+        return
     cfg = find_cfg()
     new = skill_copy()
-    me = Path(__file__).resolve()
     if not new.is_file():
         die(f"no skill copy at {new} (set GENOME_SKILL)")
     mine_t, new_t = me.read_text(), new.read_text()
     if mine_t == new_t:
-        # Say WHAT was compared. A pip install has no skill copy to swap in, so
-        # "up to date" here means "this file is the shipped file" — it is not a
-        # check against the release ledger or PyPI, and an installed copy on an
-        # older build would otherwise keep saying this forever, with the operator
-        # never learning a release exists. Stating the comparison keeps the line
-        # true instead of merely reassuring.
-        if installed_as_package():
-            print(f"genome {VERSION}: up to date — installed as a package, so there is nothing to "
-                  f"compare against; reinstall to move versions (pip install --upgrade project-genome)")
-        else:
-            print(f"genome {VERSION}: up to date")
+        # Say WHAT was compared. A repo whose vendored copy has drifted loses its own
+        # CLI as a reference only when the skill copy is the same file, and calling that
+        # "up to date" without naming the file leaves the operator unable to tell which
+        # of the two happened.
+        print(f"genome {VERSION}: up to date ({cfg.rel(new)} is byte-identical to this copy)")
         return
     rel = cfg.rel(me)
     print(f"{rel}: {file_version(mine_t)} → {file_version(new_t)}")
@@ -743,24 +842,13 @@ def _post_upgrade_findings(cfg) -> None:
     print(f"\npost-upgrade: {len(errs)} error(s), {len(warn)} warning(s) to fix in this KB")
     for i, f in enumerate(sorted(errs) + sorted(warn), 1):
         print(f"{i:>3}. {f}")
-    # The remedy is the point: a numbered list of codes without the command that
-    # clears each one turns this into another thing to research.
-    seen: dict[str, int] = {}
-    for f in found:
-        seen[f[:4]] = seen.get(f[:4], 0) + 1
-    fixes = []
-    if "E117" in seen:
-        fixes.append("`genome emit` (worklog zone is stale)")
-    if "E006" in seen:
-        fixes.append("`genome emit` (a generated zone was hand-edited or has broken markers)")
-    if "E104" in seen:
-        fixes.append("`genome outline` (outline zone is stale)")
-    if "E016" in seen:
-        fixes.append("move history out of the over-budget file (`genome archive`)")
-    if errs:
-        fixes.append("`genome lint --code E --all` lists every error; `genome doctor` explains each code")
-    if fixes:
-        print("remedies: " + "; ".join(fixes))
+    # THE REMEDY IS THE POINT, and `_remedies_for` is its ONE OWNER: the same table the
+    # estate aggregate prints, so a per-repo run and a fleet run name the same command
+    # for the same code. Keeping two tables here is how the two would drift into two
+    # vocabularies and leave an operator guessing which is authoritative.
+    rem = _remedies_for({f[:4] for f in found})
+    if rem:
+        print(f"remedies: {rem}")
     if errs:
         print("after fixing: `genome close` re-checks everything above")
 

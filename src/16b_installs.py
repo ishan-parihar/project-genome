@@ -117,13 +117,61 @@ def _script_of(path: Path) -> Path:
     A repo can vendor the CLI somewhere other than scripts/genome — pioneer-qf ships
     bin/genome — so both are probed. A path that has neither is a KB with no local CLI
     (the meta-root, a nested KB that defers to its parent): that is not 'missing', it is
-    'no CLI here', and the caller must not report it as a broken install."""
+    'no CLI here', and the caller must not report it as a broken install.
+
+    A PACKAGE install is a third shape, and it was invisible here. `~/.local/bin/genome`
+    is a console-script stub that uv/pip generates — a few lines of `import sys; from
+    project_genome import main` — so it carries no VERSION line, and resolving the symlink
+    lands on that stub instead of the CLI. Measured 2026-10-31: the registry reported the
+    bin row as `?` while the real file beside it inside the uv environment was
+    `2026.10.30-23`, one release ahead of every skills root on the machine. A registry
+    that reads its own install as unknown cannot tell the operator what is behind, and
+    that line was the only aggregate a fleet view could have been built on.
+
+    The real CLI sits beside the stub inside the same environment:
+    `<env>/lib/python*/site-packages/project_genome/_genome.py`. Probing it is what makes
+    the registry, `installs list`, `installs verify` and every aggregate see an installed
+    package as a versioned install rather than an unknown."""
     p = path
     if p.is_dir():
         for cand in (p / "scripts" / "genome", p / "bin" / "genome"):
             if cand.exists():
-                return cand
+                return _package_cli(cand)
         return p / "scripts" / "genome"  # the canonical location, absent — reported as such
+    return _package_cli(p)
+
+
+def _package_cli(p: Path) -> Path:
+    """A console-script stub's real CLI inside its environment, or the path unchanged.
+
+    A real CLI carries a VERSION line in its head — a vendored `scripts/genome`, a skills
+    root's copy, and the packaged `_genome.py` module itself all do — and is returned
+    untouched. pioneer-qf's `bin/genome` is a vendored copy that carries VERSION, so this
+    leaves it alone too.
+
+    A bin with no VERSION line is read two ways, which is the whole of the honest answer:
+    the path itself, and the path its symlink points at. Each is a `bin/` directory inside
+    an environment, so each environment root is probed for
+    `lib/python*/site-packages/*/_genome.py` — the uv-tool and plain-venv layouts
+    respectively. When nothing is there the path is returned as given, so a genuinely
+    unversioned path stays unversioned rather than being dressed up as an install."""
+    try:
+        if not p.is_file():
+            return p
+        if "VERSION" in p.read_text(errors="replace")[:512]:
+            return p
+    except OSError:
+        return p
+    bases = [p.parent]
+    try:
+        if p.resolve() != p:
+            bases.append(p.resolve().parent)
+    except OSError:
+        pass
+    for base in dict.fromkeys(bases):
+        for cand in sorted((base.parent / "lib").glob("python*/site-packages/*/_genome.py")):
+            if cand.is_file():
+                return cand
     return p
 
 

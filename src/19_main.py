@@ -162,6 +162,12 @@ def main() -> None:
     s.add_argument("target", nargs="?", help="show/lint: a KB name or path (omit for the cwd's KB)")
     s.add_argument("--all", action="store_true", help="lint: every registered KB")
 
+    s = add("fleet", cmd_fleet, "every genomic KB in one view: list | upgrade | lint (dry run first)")
+    s.add_argument("fleet_cmd", nargs="?", default="list", choices=["list", "upgrade", "lint"])
+    s.add_argument("target", nargs="?", help="upgrade/lint: scope to these KB names or paths")
+    s.add_argument("--apply", action="store_true", help="upgrade: actually perform it (default: dry run)")
+    s.add_argument("--roots", nargs="*", default=None, help="upgrade: scope the dispatch to these names or paths")
+
     s = add("wf", cmd_wf, "workflow boards: new | add | list")
     s.add_argument("wf_cmd", choices=["new", "add", "list"]); s.add_argument("name", nargs="?")
     s.add_argument("item", nargs="?")

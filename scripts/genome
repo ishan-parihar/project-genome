@@ -117,7 +117,7 @@ ERR = 2
 MIN_CHUNK = 5  # lines; `ask` hits narrower than this point at a lead line without its content
 HUB_NODE_CAP = 3000  # nodes; above this `graph hubs` ranks by degree and says betweenness was not computed
 _TMP_SEQ = itertools.count()  # makes each atomic_write temp name unique within this process too
-VERSION = "2026.10.30-29"
+VERSION = "2026.10.31-34"
 # every key genome reads: an unknown key is a typo that would silently switch a check off (E017)
 CONFIG_KEYS = {
     "genome": {"modules", "schema_version"},
@@ -3105,13 +3105,61 @@ def _script_of(path: Path) -> Path:
     A repo can vendor the CLI somewhere other than scripts/genome — pioneer-qf ships
     bin/genome — so both are probed. A path that has neither is a KB with no local CLI
     (the meta-root, a nested KB that defers to its parent): that is not 'missing', it is
-    'no CLI here', and the caller must not report it as a broken install."""
+    'no CLI here', and the caller must not report it as a broken install.
+
+    A PACKAGE install is a third shape, and it was invisible here. `~/.local/bin/genome`
+    is a console-script stub that uv/pip generates — a few lines of `import sys; from
+    project_genome import main` — so it carries no VERSION line, and resolving the symlink
+    lands on that stub instead of the CLI. Measured 2026-10-31: the registry reported the
+    bin row as `?` while the real file beside it inside the uv environment was
+    `2026.10.30-23`, one release ahead of every skills root on the machine. A registry
+    that reads its own install as unknown cannot tell the operator what is behind, and
+    that line was the only aggregate a fleet view could have been built on.
+
+    The real CLI sits beside the stub inside the same environment:
+    `<env>/lib/python*/site-packages/project_genome/_genome.py`. Probing it is what makes
+    the registry, `installs list`, `installs verify` and every aggregate see an installed
+    package as a versioned install rather than an unknown."""
     p = path
     if p.is_dir():
         for cand in (p / "scripts" / "genome", p / "bin" / "genome"):
             if cand.exists():
-                return cand
+                return _package_cli(cand)
         return p / "scripts" / "genome"  # the canonical location, absent — reported as such
+    return _package_cli(p)
+
+
+def _package_cli(p: Path) -> Path:
+    """A console-script stub's real CLI inside its environment, or the path unchanged.
+
+    A real CLI carries a VERSION line in its head — a vendored `scripts/genome`, a skills
+    root's copy, and the packaged `_genome.py` module itself all do — and is returned
+    untouched. pioneer-qf's `bin/genome` is a vendored copy that carries VERSION, so this
+    leaves it alone too.
+
+    A bin with no VERSION line is read two ways, which is the whole of the honest answer:
+    the path itself, and the path its symlink points at. Each is a `bin/` directory inside
+    an environment, so each environment root is probed for
+    `lib/python*/site-packages/*/_genome.py` — the uv-tool and plain-venv layouts
+    respectively. When nothing is there the path is returned as given, so a genuinely
+    unversioned path stays unversioned rather than being dressed up as an install."""
+    try:
+        if not p.is_file():
+            return p
+        if "VERSION" in p.read_text(errors="replace")[:512]:
+            return p
+    except OSError:
+        return p
+    bases = [p.parent]
+    try:
+        if p.resolve() != p:
+            bases.append(p.resolve().parent)
+    except OSError:
+        pass
+    for base in dict.fromkeys(bases):
+        for cand in sorted((base.parent / "lib").glob("python*/site-packages/*/_genome.py")):
+            if cand.is_file():
+                return cand
     return p
 
 
@@ -3514,6 +3562,20 @@ def kb_rows() -> list[dict]:
     return out
 
 
+def _current_release() -> str:
+    """The release a KB is measured against: max(running CLI, registered floor).
+
+    The same rule `_dispatch_upgrade` uses, re-derived rather than imported so this
+    module does not reach into the dispatcher's scope. It is the answer to "behind
+    what?", and answering it with any single root would reintroduce the defect the
+    dispatch already fixed: one lagging root pinning the whole fleet's definition of
+    current. A registry with no skill/bin row falls back to the running CLI."""
+    skill_bin = [r for r in load_installs()["installs"] if r.get("kind") in ("skill", "bin")]
+    floor = max((_version_of(Path(r["path"])) for r in skill_bin), key=_version_key, default="-")
+    me = _file_version(Path(__file__).read_text())
+    return me if not floor or _version_key(me) >= _version_key(floor) else floor
+
+
 def _kb_label(path: Path, root: Path | None = None) -> str:
     """A KB's short name, disambiguated when two KBs share a basename.
 
@@ -3571,7 +3633,13 @@ def kb_lint_one(path: Path) -> tuple[int, int, list[str]]:
 
     A KB that vendors no CLI cannot lint itself; that is reported as 'no CLI here'
     rather than silently counted as clean — the same rule the empty-registry fix
-    follows: an unproven thing is not a green thing."""
+    follows: an unproven thing is not a green thing.
+
+    Every finding is returned, not the first three. Measured 2026-10-31, the estate
+    carries 100 warnings across 79 KBs and the cap turned that into 11 rows of bare
+    counts with no code and no remedy — the aggregation that hides both the finding
+    and its fix, which is the same defect the per-repo post-upgrade list was built to
+    stop. The caller counts; the codes are the point."""
     script = _script_of(path)
     if not script.is_file():
         return (0, 0, ["no CLI in this KB — nothing to lint with"])
@@ -3589,8 +3657,56 @@ def kb_lint_one(path: Path) -> tuple[int, int, list[str]]:
         return (0, 0, [f"lint output was not JSON: {out[:120]}"])
     errs = int(j.get("errors", 0))
     warns = int(j.get("warnings", 0))
-    findings = [f"{f.get('code','?')}: {f.get('text','')}" for f in j.get("findings", [])][:3]
+    findings = [f"{f.get('code','?')} {f.get('text','')}" for f in j.get("findings", [])]
     return (errs, warns, findings)
+
+
+def _remedies_for(codes) -> str:
+    """The commands that clear each finding CODE, as one line.
+
+    The remedy is the point of a findings list: `E117` and `genome emit` are the same
+    sentence to a reader who already knows them, and an unknowing one has to go and
+    find out. This table is shared with `_post_upgrade_findings`, so a single KB's
+    post-upgrade list and the estate's aggregate name the same fix for the same code
+    instead of drifting into two vocabularies.
+
+    The W codes are here because they are what the estate actually carries. Measured
+    2026-10-31 across 77 KBs: 0 errors and 100 warnings in nine codes, every one of
+    them a W. A table that knew only the E codes therefore printed no remedies at all
+    on the first real fleet run, which is the same defect as printing no findings —
+    the answer withheld by the gap in the table rather than by a cap in the caller.
+    Each entry is the remedy the code's own lint text already names."""
+    seen = {c for c in codes if c and c[0] in "EW"}
+    fixes = []
+    if "E117" in seen:
+        fixes.append("`genome emit` (worklog zone is stale)")
+    if "E006" in seen:
+        fixes.append("`genome emit` (a generated zone was hand-edited or has broken markers)")
+    if "E104" in seen:
+        fixes.append("`genome outline` (outline zone is stale)")
+    if "E016" in seen:
+        fixes.append("move history out of the over-budget file (`genome archive`)")
+    if "W006" in seen:
+        fixes.append("two plans answer one question — keep one owner, retire the other")
+    if "W008" in seen:
+        fixes.append("delete the duplicated prose: the README links a page, it does not paraphrase it")
+    if "W009" in seen:
+        fixes.append("link the unreachable docs page from its README or a sibling page")
+    if "W010" in seen:
+        fixes.append("add a table of contents to the long file (or split it)")
+    if "W011" in seen:
+        fixes.append("`genome archive <plan> --section ...` for the superseded section")
+    if "W014" in seen:
+        fixes.append("re-ask the operator on the aged ask, or withdraw it")
+    if "W105" in seen:
+        fixes.append("point the citation at a live record, or retire the doc's claim")
+    if "W201" in seen:
+        fixes.append("class the figure in that section (measured | stated | estimated)")
+    if "W401" in seen:
+        fixes.append("`genome emit` refreshes the manual's covered code, or re-verify it")
+    if any(c.startswith("E") for c in seen):
+        fixes.append("`genome lint --code E --all` lists every error; `genome doctor` explains each code")
+    return "; ".join(fixes)
 
 
 def cmd_kb(args) -> None:
@@ -3601,10 +3717,24 @@ def cmd_kb(args) -> None:
         if not rows:
             print("no knowledge bases registered — `genome installs register kb <path>`")
             return
+        # THE VERSION IS THE POINT OF THIS LIST. A list of 79 names and paths answers
+        # "where are they" and cannot answer "which are behind", which is the question
+        # that starts every upgrade — measured 2026-10-31, that is exactly what it did,
+        # so the staleness had to be assembled by hand from another command. `-` is a
+        # KB with no local CLI: present and legitimate, nothing to compare against,
+        # and never printed as a broken install.
+        behind = 0
         for r in sorted(rows, key=lambda r: r["path"]):
             p = Path(r["path"])
-            print(f"{_kb_label(p):34} {p}  [{r.get('kind','?')}]")
-        print(f"\n{len(rows)} knowledge base(s) registered")
+            v = _version_of(p)
+            if v not in ("none", "missing"):
+                ref = _current_release()
+                if _version_key(v) < _version_key(ref):
+                    print(f"{_kb_label(p):34} {r['path']:56} {v:14} behind {ref}")
+                    behind += 1
+                    continue
+            print(f"{_kb_label(p):34} {r['path']:56} {v:14} [{r.get('kind','?')}]")
+        print(f"\n{len(rows)} knowledge base(s) registered, {behind} behind the current release")
         return
     if cmd == "show":
         p = resolve_kb(args.target)
@@ -3629,6 +3759,7 @@ def cmd_kb(args) -> None:
         total_e = total_w = 0
         failures = []
         no_cli = []
+        codes: dict[str, list[str]] = {}  # code -> the KBs carrying it, for the remedy summary
         for t in targets:
             errs, warns, findings = kb_lint_one(t)
             total_e += errs
@@ -3642,16 +3773,115 @@ def cmd_kb(args) -> None:
                 continue
             status = "ok" if not errs and not findings else ("FAIL" if errs else "warn")
             print(f"{status:5} {label:34} {errs} error(s), {warns} warning(s)")
+            # EVERY finding, not the first three. Measured 2026-10-31, the cap hid the
+            # 4th and later ones and the codes with them, so a per-KB line was a count
+            # with no way to act on it — the same defect `_post_upgrade_findings` was
+            # written to stop, arriving through the aggregate. The remedy line per KB
+            # is what makes each row actionable instead of merely informative.
             for f in findings:
                 print(f"        {f}")
+                codes.setdefault(f[:4], [])
+                if label not in codes[f[:4]]:
+                    codes[f[:4]].append(label)
             if errs:
                 failures.append(label)
         print(f"\nkb lint: {len(targets)} KB(s), {total_e} error(s), {total_w} warning(s)"
               + (f", {len(no_cli)} with no CLI to lint with" if no_cli else ""))
+        # THE REMEDY IS THE POINT. A numbered list of codes without the command that
+        # clears each one turns a lint into another thing to research, so the
+        # aggregate answer names the fix and the KBs it applies to. `remedies:` is the
+        # exact prefix `_post_upgrade_findings` prints, so a per-repo run and the estate
+        # run name the same command for the same code.
+        rem = _remedies_for(codes.keys())
+        if rem:
+            print(f"remedies: {rem}")
+            for code, kbs in sorted(codes.items()):
+                print(f"        {code} in {len(kbs)} KB(s): {', '.join(kbs[:12])}"
+                      + (f" (+{len(kbs) - 12} more)" if len(kbs) > 12 else ""))
         if failures:
             die(f"{len(failures)} KB(s) with errors: {', '.join(failures)}", ERR)
         return
     die(f"unknown kb subcommand {cmd}", ERR)
+
+
+def cmd_fleet(args) -> None:
+    """fleet: one surface for the whole job — what is behind, take it current, what to fix after.
+
+    The operator's ask, measured 2026-10-31: three commands answered three parts of
+    one job in three geometries, and joining them by path was the manual search this
+    replaces. "What is stale" was `installs verify --against-shipped` (a flat list with
+    no KB label), "take it current" was `installs upgrade` (the same list, a different
+    verb), "what must I fix" was `kb lint --all` (rows keyed by label, capped at three
+    findings with no remedy). The label came from `_kb_label()`, which only `kb` used,
+    so no single output could name a KB, its version, and its fixes together.
+
+    Nothing new is invented here: `list` reads the registry, `upgrade` calls the
+    dispatcher that already scopes and already dry-runs, `lint` reuses the per-KB
+    printer. The rule this obeys is the genome's own — one owner per question, so the
+    verb is a joining surface and not a second registry.
+
+    `genome fleet` alone is `list`: the glance that answers "which are behind", which
+    is the question every upgrade starts from."""
+    sub = getattr(args, "fleet_cmd", None) or "list"
+    if sub == "upgrade":
+        _dispatch_upgrade(load_installs()["installs"], getattr(args, "apply", False),
+                          getattr(args, "target", None) or getattr(args, "roots", None))
+        return
+    if sub == "lint":
+        # `fleet lint [names...]` is `kb lint --all` with an optional scope, so the
+        # printer, the counting, and the empty-registry gate have one owner. `target`
+        # names the scope and `all` asks for every KB; when both arrive the scope wins.
+        args.kb_cmd = "lint"
+        args.all = not bool(getattr(args, "target", None))
+        cmd_kb(args)
+        return
+    _fleet_list()
+
+
+def _fleet_list() -> None:
+    """Every registered install by label, version and status — one line per thing to act on.
+
+    A line is grouped by what the operator does about it: behind (upgradable), current,
+    a skills root or package install (the thing the fleet converges toward), and a KB
+    with no local CLI (present, legitimate, nothing to compare). The groups are the
+    answer to "what must I do", so the list ends with the counts rather than leaving
+    them to be summed by eye."""
+    rows = load_installs()["installs"]
+    if not rows:
+        die("no installs registered — this machine has proven nothing: run install.sh "
+            "(it registers everything it creates), or `genome installs scan`", ERR)
+    ref = _current_release()
+    behind, current, sources, no_cli = [], [], [], []
+    for r in sorted(rows, key=lambda r: (r.get("kind", ""), r["path"])):
+        p = Path(r["path"])
+        kind = r.get("kind", "?")
+        if kind in ("skill", "bin"):
+            sources.append((p, kind, _version_of(p)))
+            continue
+        v = _version_of(p)
+        if v in ("none", "missing"):
+            no_cli.append((p, _kb_label(p), v))
+        elif _version_key(v) < _version_key(ref):
+            behind.append((p, _kb_label(p), v))
+        else:
+            current.append((p, _kb_label(p), v))
+    print(f"fleet: {len(rows)} registered install(s) · current release {ref}")
+    if sources:
+        print(f"\n  sources ({len(sources)}) — what the fleet converges on")
+        for p, kind, v in sources:
+            print(f"    {kind:9} {v:14} {p}")
+    if behind:
+        print(f"\n  behind ({len(behind)}) — `genome fleet upgrade --roots <name>` takes one current")
+        for p, label, v in behind:
+            print(f"    {label:34} {v:14} {p}")
+    if current:
+        print(f"\n  current ({len(current)})")
+        for p, label, v in current:
+            print(f"    {label:34} {v:14} {p}")
+    if no_cli:
+        print(f"\n  no local CLI ({len(no_cli)}) — registered, nothing to compare")
+        for p, label, v in no_cli:
+            print(f"    {label:34} {v:14} {p}")
 # ---------------------------------------------------------------- agents commands
 
 def agent_id(args) -> str:
@@ -6018,27 +6248,126 @@ def file_version(text: str) -> str:
     return m.group(1) if m else "?"
 
 
+def _package_reference() -> Path | None:
+    """The release an INSTALLED package should be measured against, or None when there is none.
+
+    An installed package is the shipped copy of its install, so comparing it against
+    itself can only ever print "up to date" — measured 2026-10-31, the genome on PATH
+    said exactly that while sitting six releases behind the kernel, so no release was
+    discoverable from the one command whose job is to say so. The comparison is still
+    useful, but the reference has to come from OUTSIDE the package.
+
+    Those roots are probed directly rather than through `skill_copy()`, which returns
+    the running file when it detects an installed package — the very answer that
+    produced the false all-clear. Two sources are compared, not one, because the honest
+    definition of "current" is what the operator would converge on:
+
+      * the newest skills root, refreshed at publish time;
+      * the kernel checkout's working tree, which is ahead of the roots on exactly
+        the days a package goes stale. Measured 2026-10-31: the running kernel was
+        `-30`, the roots `-22`, and a package at `-23` is behind BOTH definitions
+        of current by a different amount — so naming only the root understates it.
+
+    `GENOME_SKILL` still wins outright, because an operator who names a reference has
+    named it."""
+    env = os.environ.get("GENOME_SKILL")
+    if env:
+        p = Path(env).expanduser()
+        return p if p.is_file() else None
+    cands = [
+        Path("~/.agents/skills/project-genome/scripts/genome").expanduser(),
+        Path("~/.claude/skills/project-genome/scripts/genome").expanduser(),
+        Path("~/.zcode/skills/project-genome/scripts/genome").expanduser(),
+        Path("~/.codex/skills/project-genome/scripts/genome").expanduser(),
+    ]
+    # The kernel checkout: where the operator develops, so it is ahead of the roots on
+    # exactly the days a package goes stale. Probed from the RUNNING FILE's own tree —
+    # a vendored copy sits in scripts/genome beside src/NN_*.py — and kept as a plain
+    # candidate rather than a winner, because on the neutral cwd where a package run
+    # happens most, walking up from the cwd finds nothing. Measured 2026-10-31: an
+    # earlier registry-row probe that asked only for "AGENTS.md" matched
+    # `saas/lifeos-bot` (an AGENTS.md with no src/), so the package was measured
+    # against a `-29` peer instead of the release it would actually converge on.
+    for base in (Path(__file__).resolve().parent, Path.cwd()):
+        for up in (base, *base.parents):
+            if (up / "AGENTS.md").is_file() and any(up.glob("src/[0-9][0-9]*_*.py")):
+                cands.append(up / "scripts" / "genome")
+                break
+    # The registry's vendored rows too, so a machine whose kernel checkout sits
+    # outside both the running file's tree and the cwd still reports the newest
+    # installed genome rather than only the skills roots.
+    for r in load_installs()["installs"]:
+        if r.get("kind") != "vendored":
+            continue
+        p = Path(r["path"]) / "scripts" / "genome"
+        if p.is_file() and _file_version(p.read_text(errors="replace")) != "-":
+            cands.append(p)
+    best, best_v = None, "-"
+    for c in cands:
+        if not c.is_file():
+            continue
+        v = _file_version(c.read_text())
+        if best is None or _version_key(v) > _version_key(best_v):
+            best, best_v = c, v
+    return best
+
+
+def _package_upgrade(me: Path) -> None:
+    """Report an installed package's staleness against what it would converge on.
+
+    `skill_copy()` returns the running file when it detects an install, so the ordinary
+    comparison path compares the package against itself and can only print "up to
+    date" — that is the lie the operator must never see, and the genome on PATH was
+    printing it six releases deep. The reference is probed outside the package
+    (skills roots and the kernel checkout), and the answer names the reinstall command
+    that actually closes it, because there is no file for an installed package to swap.
+
+    Never exits non-zero: the package is a working tool, and a gate failure here would
+    tell a caller the machine is broken when it is simply one release behind."""
+    ref = _package_reference()
+    mine = _file_version(me.read_text())
+    if ref is None:
+        print(f"genome {mine}: up to date — installed as a package, and no skills root on this "
+              f"machine to compare against; reinstall to move versions")
+        return
+    want = _file_version(ref.read_text())
+    if _version_key(mine) < _version_key(want):
+        print(f"genome {mine}: BEHIND — this machine is at {want}")
+        print(f"      {ref}")
+        print(f"      this package is the genome on PATH; move it with "
+              f"`uv tool install --force project-genome` (or "
+              f"`pip install --upgrade project-genome`)")
+        print(f"      then `genome fleet lint` shows what each KB needs fixed")
+        return
+    print(f"genome {mine}: up to date ({ref} is {want})")
+
+
 def cmd_upgrade(args) -> None:
     """Compare this repo's vendored CLI with the skill's copy; --apply swaps it in, keeping a backup and any local patch as a diff."""
     import difflib
+    me = Path(__file__).resolve()
+    # AN INSTALLED PACKAGE IS MEASURED AGAINST WHAT IT WOULD CONVERGE ON, NOT ITSELF,
+    # AND THE CHECK RUNS BEFORE find_cfg(). `skill_copy()` returns the running file when
+    # it is an install, so `upgrade` compared the file against itself and could only
+    # print "up to date" — the genome on PATH said that while six releases behind the
+    # kernel. Ordering, not just comparison, was the defect: from a neutral cwd the
+    # command died in find_cfg with "no genome.toml upward of cwd" before any staleness
+    # check ran, so the one command that reports the package's version answered a
+    # different question entirely unless the operator happened to be inside a KB.
+    if installed_as_package():
+        _package_upgrade(me)
+        return
     cfg = find_cfg()
     new = skill_copy()
-    me = Path(__file__).resolve()
     if not new.is_file():
         die(f"no skill copy at {new} (set GENOME_SKILL)")
     mine_t, new_t = me.read_text(), new.read_text()
     if mine_t == new_t:
-        # Say WHAT was compared. A pip install has no skill copy to swap in, so
-        # "up to date" here means "this file is the shipped file" — it is not a
-        # check against the release ledger or PyPI, and an installed copy on an
-        # older build would otherwise keep saying this forever, with the operator
-        # never learning a release exists. Stating the comparison keeps the line
-        # true instead of merely reassuring.
-        if installed_as_package():
-            print(f"genome {VERSION}: up to date — installed as a package, so there is nothing to "
-                  f"compare against; reinstall to move versions (pip install --upgrade project-genome)")
-        else:
-            print(f"genome {VERSION}: up to date")
+        # Say WHAT was compared. A repo whose vendored copy has drifted loses its own
+        # CLI as a reference only when the skill copy is the same file, and calling that
+        # "up to date" without naming the file leaves the operator unable to tell which
+        # of the two happened.
+        print(f"genome {VERSION}: up to date ({cfg.rel(new)} is byte-identical to this copy)")
         return
     rel = cfg.rel(me)
     print(f"{rel}: {file_version(mine_t)} → {file_version(new_t)}")
@@ -6101,24 +6430,13 @@ def _post_upgrade_findings(cfg) -> None:
     print(f"\npost-upgrade: {len(errs)} error(s), {len(warn)} warning(s) to fix in this KB")
     for i, f in enumerate(sorted(errs) + sorted(warn), 1):
         print(f"{i:>3}. {f}")
-    # The remedy is the point: a numbered list of codes without the command that
-    # clears each one turns this into another thing to research.
-    seen: dict[str, int] = {}
-    for f in found:
-        seen[f[:4]] = seen.get(f[:4], 0) + 1
-    fixes = []
-    if "E117" in seen:
-        fixes.append("`genome emit` (worklog zone is stale)")
-    if "E006" in seen:
-        fixes.append("`genome emit` (a generated zone was hand-edited or has broken markers)")
-    if "E104" in seen:
-        fixes.append("`genome outline` (outline zone is stale)")
-    if "E016" in seen:
-        fixes.append("move history out of the over-budget file (`genome archive`)")
-    if errs:
-        fixes.append("`genome lint --code E --all` lists every error; `genome doctor` explains each code")
-    if fixes:
-        print("remedies: " + "; ".join(fixes))
+    # THE REMEDY IS THE POINT, and `_remedies_for` is its ONE OWNER: the same table the
+    # estate aggregate prints, so a per-repo run and a fleet run name the same command
+    # for the same code. Keeping two tables here is how the two would drift into two
+    # vocabularies and leave an operator guessing which is authoritative.
+    rem = _remedies_for({f[:4] for f in found})
+    if rem:
+        print(f"remedies: {rem}")
     if errs:
         print("after fixing: `genome close` re-checks everything above")
 
@@ -6965,6 +7283,12 @@ def main() -> None:
     s.add_argument("kb_cmd", choices=["list", "show", "lint"])
     s.add_argument("target", nargs="?", help="show/lint: a KB name or path (omit for the cwd's KB)")
     s.add_argument("--all", action="store_true", help="lint: every registered KB")
+
+    s = add("fleet", cmd_fleet, "every genomic KB in one view: list | upgrade | lint (dry run first)")
+    s.add_argument("fleet_cmd", nargs="?", default="list", choices=["list", "upgrade", "lint"])
+    s.add_argument("target", nargs="?", help="upgrade/lint: scope to these KB names or paths")
+    s.add_argument("--apply", action="store_true", help="upgrade: actually perform it (default: dry run)")
+    s.add_argument("--roots", nargs="*", default=None, help="upgrade: scope the dispatch to these names or paths")
 
     s = add("wf", cmd_wf, "workflow boards: new | add | list")
     s.add_argument("wf_cmd", choices=["new", "add", "list"]); s.add_argument("name", nargs="?")
