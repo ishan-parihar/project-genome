@@ -16,10 +16,10 @@ kbs and upgrade it effectively, rather than manual search and upgrade of each kb
 
 | fact | measurement |
 |---|---|
-| the installed package on PATH | `~/.local/bin/genome` → uv tool `project-genome`, `site-packages/project_genome/_genome.py` at **`2026.10.30-23`** — six releases behind the kernel |
+| the installed package on PATH | `~/.local/bin/genome` → uv tool `project-genome`, `site-packages/project_genome/_genome.py` at **`2026.10.30-23`** — six releases behind the `2026.10.30-29` kernel it was measured against, and **eleven** behind the `2026.10.31-34` this session shipped |
 | every harness skills root | `~/.agents`, `~/.claude`, `~/.zcode`, `~/.codex` all at **`2026.10.30-22`** |
 | the kernel repo | `2026.10.31-34`, and it is the only checkout that is current |
-| the fleet | 76 vendored copies across 76 repos; 74 at `2026.10.27-13`, `operant` `2026.10.21-2`, `artificial-route` `2026.10.22-17`, `saas/lifeos-bot` `2026.10.30-29` |
+| the fleet | **76 installs behind:** 73 at `2026.10.27-13` (including `pioneer-qf`, which vendors at `bin/genome`), `operant` `2026.10.21-2`, `artificial-route` `2026.10.22-17`, `saas/lifeos-bot` `2026.10.30-29`; the kernel at `2026.10.31-34` is the one current copy |
 | registry coverage | **complete** after this session: a disk sweep finds 78 `scripts/genome` repos and 80 `genome.toml` KBs. **The kernel was the one exception — it was not registered, so no manifest reader could see the newest copy on the machine. It is registered now, and 4 ghost rows (holon-personal and its nested holon, discord-cli, tg-cli — directories that no longer exist) are gone.** |
 | registry reach | `installs upgrade` dry run names **76 targets** and can reach `bin/genome` repos (`pioneer-qf`) as well as `scripts/genome` ones |
 | `kb list` | 77 KBs, **name + path + kind only — no version, so it cannot answer "what is stale"** |

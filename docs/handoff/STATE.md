@@ -3,6 +3,56 @@
 Current snapshot only (no history: that is the worklog). The first `## ` block is
 what `genome wake` shows.
 
+## State — 2026-10-31, after `genome fleet` unified the three upgrade surfaces (`2026.10.31-34`)
+
+- **The estate is now one verb away: `genome fleet`.** It answers what is behind, takes it
+  current, and prints the fix list per KB. `fleet` alone is `list` - grouped by what the
+  operator does about it (sources / behind / current / no-local-CLI) - and the current run
+  on this machine reads **83 registered installs, current release `2026.10.31-34`, 5
+  sources, 76 behind, 1 current (the kernel), 1 with no local CLI (the meta-root).**
+  `fleet upgrade [--roots --apply]` and `fleet lint [names...]` reuse the existing
+  dispatch and lint printer, so there is no second registry and no second copy of any
+  answer.
+- **The installed package is no longer invisible or self-comparing.** `~/.local/bin/genome`
+  is a uv tool whose real CLI sits at `lib/python3.13/site-packages/project_genome/_genome.py`
+  (`2026.10.30-23`, seven releases behind). The bin symlink resolved to a console-script
+  stub with no VERSION line, so the registry read the row as `?`; `_script_of()` now probes
+  the environment beside the stub, and `installs verify --against-shipped` went from
+  "81 behind, **1 unknown**" to "81 behind, **0 unknown**". `genome upgrade` from a neutral
+  cwd now prints `BEHIND — this machine is at 2026.10.31-34` with the reinstall command,
+  where it used to die in `find_cfg()` before checking anything, or print "up to date".
+- **76 installs are behind the current release `2026.10.31-34`:** 73 at
+  `2026.10.27-13` (including `pioneer-qf`, which vendors at `bin/genome`, not
+  `scripts/genome`), `operant` at `2026.10.21-2`, `artificial-route` at
+  `2026.10.22-17`, `saas/lifeos-bot` at `2026.10.30-29`. The kernel (`2026.10.31-34`) is
+  the one current copy; `my-projects` is the one registered KB with no local CLI at all.
+  The four skills roots sit at `2026.10.30-22`. These are measured against `fleet`, which
+  probes both `scripts/genome` and `bin/genome` — a probe looking only in `scripts/`
+  undercounts by one (pioneer-qf).
+- **The registry is now complete and clean.** It previously missed the kernel itself (the
+  one genomic project no manifest reader could see) and carried four ghost rows whose
+  directories no longer exist (holon-personal and its nested holon, discord-cli, tg-cli).
+  The kernel is registered as `vendored` with a note; the ghosts are unregistered. 83 rows
+  resolve, and `installs scan` finds nothing unregistered.
+- **`kb lint --all` prints every finding with its remedy, and the remedy table has one
+  owner.** `kb_lint_one()` used to cap findings at three; it now returns all of them, and
+  `_remedies_for()` - shared with `_post_upgrade_findings()` so the two cannot drift into
+  two vocabularies - prints `remedies:` plus a `W0xx in N KB(s)` line per code. Measured on
+  this machine: 77 KBs, **0 errors, 100 warnings in 9 codes** (W006 x2, W008, W009, W010 x5,
+  W011 x3, W014 x6, W105, W201, W401 x2).
+- **A defect in the fix was caught by its own test and is recorded in-code.** The first
+  remedy table knew only the E codes, and the estate carries only W codes, so the first
+  `fleet lint` printed no remedies at all - the same failure shape as the finding cap. The
+  table now covers the codes the machine produces.
+- **All suites green at `2026.10.31-34`:** test_genome 38/38, test_package 8/8,
+  test_package_modes 5/5, check_ps1 412 lines, kernel lint clean and doctor healthy, wheel
+  bytes == `scripts/genome` bytes == the ledger's `-34` checksum. `kb_registry` asserts the
+  package layout, the version column and the behind group, and fails on a scratch revert
+  with `version: '?'`.
+- **No fleet-wide `--apply` was run.** A scoped `--roots` dry run reached 2 of 2 named
+  repos on the `-34` source, and a scope matching nothing still dies (exit 2) rather than
+  printing the all-clear. The full pass remains the operator's call.
+
 ## State — 2026-10-31, after the upgrade mechanism was proved by a real scoped `--apply` (`2026.10.30-29`)
 
 - **The fleet is 77 vendored CLI files across 77 repos, and 76 of them sit at
