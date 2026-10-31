@@ -1489,8 +1489,14 @@ def kb_registry(root: Path) -> None:
     assert str(kb_nocli) not in d.stdout, d.stdout
     # an UP-TO-DATE copy is not a target either: the dispatch names only what is
     # behind, so the list IS the work queue and it must not contain current copies
-    assert str(sk) not in d.stdout, d.stdout
-    assert str(kb_bin) not in d.stdout, d.stdout
+    # (the swap-source line below legitimately names the skill root, so the check
+    # is on the target lines, which is what "is a target" means)
+    upgrade_lines = [ln for ln in d.stdout.splitlines() if "would upgrade" in ln]
+    assert upgrade_lines and all(str(sk) not in ln and str(kb_bin) not in ln for ln in upgrade_lines), d.stdout
+    # the swap SOURCE is named too: the operator must be able to see which copy the
+    # fleet is converging toward, and a lagging root is the failure this dispatch
+    # exists to prevent (a -23 run converging the fleet on -22 looked like success)
+    assert "swap source:" in d.stdout or "the swap source is" in d.stdout, d.stdout
 
 
 @case

@@ -161,7 +161,7 @@ def _repo_cli(path: Path) -> Path | None:
     return None
 
 
-def _dispatch_upgrade(rows: list, apply: bool) -> None:
+def _dispatch_upgrade(rows: list, apply: bool, roots: list | None = None) -> None:
     """Dispatch an upgrade to every registered copy that is behind the shipped one.
 
     Each repo is upgraded by ITS OWN vendored CLI, run inside that repo — the
@@ -171,12 +171,48 @@ def _dispatch_upgrade(rows: list, apply: bool) -> None:
 
     A DRY RUN is the default: this writes into other people's repositories, and a
     fleet-wide rewrite is the operator's call. --apply performs it; every repo's
-    result is reported, and one failure does not stop the rest."""
+    result is reported, and one failure does not stop the rest.
+
+    `--roots` scopes the dispatch. Measured 2026-10-30, the flag was parsed and then
+    ignored — every byte of scope logic lived in `cmd_upgrade`, and the dispatcher
+    ran the whole fleet regardless — so the sanctioned scoped test could not be
+    performed at all. A scope that matches nothing now dies: an all-clear printed
+    to a `--roots no-such-repo` request is the one output that must never appear,
+    because the operator reading it concludes the fleet is current.
+
+    THE REFERENCE IS MAX(RUNNING CLI, REGISTERED FLOOR). The registered floor came
+    from the skills roots, which install.sh refreshes only at publish time: on a
+    development day the roots sit one release behind the CLI actually running, and
+    the dispatch reported that lagging copy as the target. `GENOME_SKILL` is handed
+    to each vendored CLI, which already reads it, so a fleet dispatched from -23
+    converges on -23 rather than stopping at the roots' -22 — the bootstrap
+    failure proven in a sandbox, where a -23 dispatch delegated to each repo's own
+    old CLI and the whole fleet pinned at -22."""
     skill_bin = [r for r in rows if r.get("kind") in ("skill", "bin")]
     if not skill_bin:
         die("no skill/bin copy registered to use as the shipped reference — "
             "run install.sh first", ERR)
-    ref = max((_version_of(Path(r["path"])) for r in skill_bin), key=_version_key)
+    # The running CLI is the newest thing the operator can name, and it beats a
+    # registered floor that a publish has not yet caught up with. A hand-edited
+    # working tree still wins, which is intended: it is what the fleet is converging
+    # toward, and operator hands are on the wheel.
+    floor = max((_version_of(Path(r["path"])) for r in skill_bin), key=_version_key)
+    me = _file_version(Path(__file__).read_text())
+    ref = me if _version_key(me) >= _version_key(floor) else floor
+    if roots:
+        wanted = {r.strip().rstrip("/") for r in roots if r.strip()}
+        before = len(rows)
+        rows = [r for r in rows
+                if str(Path(r["path"]).resolve().name) in wanted
+                or r["path"].rstrip("/") in wanted
+                or os.path.basename(r["path"].rstrip("/")) in wanted]
+        if not rows:
+            # 2026-10-30, `--roots no-such-repo` printed the all-clear line, which is the
+            # one output that must never be produced by a scoped request that matched
+            # nothing — an operator reading it would conclude the fleet is current.
+            names = sorted({Path(r["path"]).resolve().name for r in load_installs()["installs"]})
+            die("no registered install matches " + ", ".join(sorted(wanted))
+                + f" ({before} registered; `genome installs list` names them)", ERR)
     targets = []
     for r in rows:
         if r.get("kind") not in ("vendored", "kb"):
@@ -193,12 +229,33 @@ def _dispatch_upgrade(rows: list, apply: bool) -> None:
         return
     print(f"dispatch: {len(targets)} cop(y/ies) behind {ref}"
           + ("" if apply else " — DRY RUN (--apply performs the upgrade)"))
+    # The swap source each repo's own CLI reads. `skill_copy()` probes the four
+    # skills roots and picks the newest, so it resolves the release even when one
+    # root lags — but a repo whose vendored CLI is OLDER than this dispatch still
+    # hardcodes a single root inside ITSELF. Handing it the right source through the
+    # env it already reads closes the bootstrap problem for every version at once,
+    # which is the only way a fleet dispatched from -23 can reach -23.
+    swap_source = skill_copy()
+    env = dict(os.environ)
+    if swap_source.is_file():
+        env["GENOME_SKILL"] = str(swap_source)
+        sv = _file_version(swap_source.read_text())
+        if _version_key(sv) < _version_key(ref):
+            # Say it out loud rather than letting a slow skills root pin the fleet:
+            # the dispatch would report the target while every repo lands on the
+            # source's version. The drill is to publish first (or point
+            # GENOME_SKILL at the release), and this line names both.
+            print(f"note: the swap source is {sv}, the dispatch target is {ref}")
+            print(f"      each repo swaps in the source, so publish first, or "
+                  f"GENOME_SKILL=<the {ref} copy> genome installs upgrade --apply")
+        else:
+            print(f"swap source: {swap_source} ({sv})")
     ok = skipped = failed = 0
     for r, cli, v in targets:
         cmd = [sys.executable, str(cli), "upgrade"] + (["--apply"] if apply else [])
         try:
             res = subprocess.run(cmd, cwd=str(Path(r["path"])), capture_output=True,
-                                 text=True, timeout=300)
+                                 text=True, timeout=300, env=env)
         except (OSError, subprocess.TimeoutExpired) as e:
             print(f"ERROR  {r['path']} — {e}")
             failed += 1
@@ -207,8 +264,20 @@ def _dispatch_upgrade(rows: list, apply: bool) -> None:
         if res.returncode == 0:
             ok += 1
             print(f"{'upgraded' if apply else 'would upgrade':14} {r['path']}  {v} → {ref}")
-            for line in out.splitlines()[:2]:
+            # The new lint output is part of the result, not noise: a fleet run that
+            # prints only the version line leaves every post-upgrade fix list unread.
+            for line in out.splitlines()[:1]:
                 print(f"        {line}")
+            for line in out.splitlines():
+                s = line.strip()
+                if s.startswith("lint:") or s.startswith("genome.toml:"):
+                    print(f"        {s}")
+            shown = 0
+            for line in out.splitlines():
+                s = line.strip()
+                if s[:1].isdigit() and ". [" in s[:8] and shown < 5:
+                    print(f"        {s}")
+                    shown += 1
         elif "local edits" in out or "patch" in out.lower():
             # the copy carries a local patch: `upgrade` refused, which is the right
             # answer — it is reported, never forced through with --accept-patch-loss
@@ -216,7 +285,12 @@ def _dispatch_upgrade(rows: list, apply: bool) -> None:
             print(f"skipped (local patch)  {r['path']}  {v}")
         else:
             failed += 1
-            print(f"ERROR  {r['path']} — {out.splitlines()[0] if out else res.returncode}")
+            # A child that produced no output still owes a REASON, not an exit status:
+            # a crash and a clean refusal both surface as bare 1 otherwise, and the
+            # whole point of a per-repo line is that it is actionable.
+            why = (out.splitlines()[0] if out else
+                   "exit " + str(res.returncode) + " (no output — run it directly: " + " ".join(cmd) + ")")
+            print(f"ERROR  {r['path']} — {why}")
     print(f"\ndispatch: {ok} ok, {skipped} skipped (local patch), {failed} failed")
     if failed:
         die(f"{failed} copy/copies failed to upgrade", ERR)
@@ -225,7 +299,8 @@ def _dispatch_upgrade(rows: list, apply: bool) -> None:
 def cmd_installs(args) -> None:
     """installs: list | verify | register | scan — the machine's genome installs, one manifest."""
     if args.installs_cmd == "upgrade":
-        _dispatch_upgrade(load_installs()["installs"], getattr(args, "apply", False))
+        _dispatch_upgrade(load_installs()["installs"], getattr(args, "apply", False),
+                         getattr(args, "roots", None))
         return
     if args.installs_cmd == "list":
         data = load_installs()
@@ -255,6 +330,48 @@ def cmd_installs(args) -> None:
         data["installs"] = rows
         save_installs(data)
         print(f"registered: {kind} {path} (version {_version_of(Path(path))})")
+        return
+    if args.installs_cmd == "unregister":
+        # The registry had no way to forget, so a path that no longer exists stayed
+        # listed forever: measured 2026-10-30, `holon-personal` (and its nested
+        # `holon-personal/holon`) were still registered as kb rows although the
+        # directory is gone, and every upgrade dry run counted them as targets. A
+        # registry that cannot forget reports a fleet size that is too high, which is
+        # the same class of lie as an empty registry reporting green.
+        cand = getattr(args, "kind", None)
+        # The path is the FIRST positional, but `installs` shares its positionals
+        # with `register` (kind, then path), so `unregister <path>` puts the path in
+        # `kind` and leaves `path` None. Accept either: the four real kinds are
+        # refused so a typo like `unregister kb` says so instead of hunting for a
+        # repo called "kb".
+        if not args.path and cand and cand not in ("skill", "bin", "vendored", "kb"):
+            args.path, cand = cand, None
+        if not args.path:
+            die("unregister needs the path: `genome installs unregister <path>` "
+                "(or `installs list` to see them)", ERR)
+        raw = Path(args.path).expanduser()
+        data = load_installs()
+        rows = data["installs"]
+        # Exact path first. A NAME match is offered only when it is unambiguous:
+        # `holon` and `project-genome` each resolve to several rows (the four skill
+        # roots), and a name match there would drop rows the operator never named.
+        hit = [r for r in rows if r["path"] == str(raw)
+               or r["path"] == str(raw.resolve())]
+        if not hit:
+            by_name = [r for r in rows if Path(r["path"]).name == raw.name]
+            if len(by_name) > 1:
+                die(f"'{raw.name}' matches {len(by_name)} registered installs — "
+                    "pass one in full: " + ", ".join(r["path"] for r in by_name), ERR)
+            hit = by_name
+        if not hit:
+            print(f"no registered install matches {raw} — nothing to unregister")
+            return
+        gone = [r["path"] for r in hit]
+        data["installs"] = [r for r in rows if r not in hit]
+        save_installs(data)
+        for p in gone:
+            print(f"unregistered: {p}")
+        print(f"{len(gone)} row(s) removed")
         return
     if args.installs_cmd == "verify":
         data = load_installs()

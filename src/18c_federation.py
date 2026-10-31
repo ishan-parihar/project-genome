@@ -606,13 +606,53 @@ def skill_copy() -> Path:
     For a vendored copy: the skills root's genome (what install.sh keeps current).
     For an INSTALLED package: the running script itself — there is no separate
     shipped copy, so comparing against itself is the honest answer ('up to date')
-    rather than a failure about a file that does not exist."""
+    rather than a failure about a file that does not exist.
+
+    The probe is every skills root on the machine, not one. Measured 2026-10-30:
+    `~/.agents`, `~/.claude`, `~/.zcode` and `~/.codex` each held a real 4.8 MB copy
+    at four distinct inodes, and a hardcoded `~/.agents/...` answer meant a fleet
+    whose `.agents` root lagged upgraded to the LAGGING copy — the bootstrap problem
+    that let a fleet dispatched at `2026.10.30-23` converge on `-22` and stop. The
+    probe takes the newest of what exists, so one root lagging cannot pin the fleet,
+    and a root that is a symlink into another resolves to the same inode either way.
+
+    It also counts the kernel repo's working tree, which is where the operator
+    develops: measured 2026-10-30 the kernel's `scripts/genome` was at
+    `2026.10.30-23` while every skills root was still at `-22`, and the dispatch
+    handed each vendored CLI a `-22` source — which is exactly the convergence
+    failure it exists to prevent. The kernel is a plain candidate, scored on merit:
+    it wins on a development day, and an older checkout of it loses to the roots."""
     env = os.environ.get("GENOME_SKILL")
     if env:
         return Path(env).expanduser()
     if installed_as_package():
         return Path(__file__).resolve()
+    cands = [
+        Path("~/.agents/skills/project-genome/scripts/genome").expanduser(),
+        Path("~/.claude/skills/project-genome/scripts/genome").expanduser(),
+        Path("~/.zcode/skills/project-genome/scripts/genome").expanduser(),
+        Path("~/.codex/skills/project-genome/scripts/genome").expanduser(),
+        # The kernel repo's working tree, last by design but scored on merit: on a
+        # development day it is the newest file on the machine, and every skills root
+        # (which install.sh only refreshes at publish time) is one release behind it.
+        Path(__file__).resolve(),
+    ]
+    best, best_v = None, "-"
+    for c in cands:
+        if not c.is_file():
+            continue
+        v = _file_version(c.read_text())
+        if best is None or _version_key(v) > _version_key(best_v):
+            best, best_v = c, v
+    if best is not None:
+        return best
     return Path("~/.agents/skills/project-genome/scripts/genome").expanduser()
+
+
+def _file_version(text: str) -> str:
+    """The VERSION in a genome script's text, or '-' when it carries none."""
+    m = re.search(r'^VERSION = "([^"]+)"', text, re.M)
+    return m.group(1) if m else "-"
 
 
 def file_version(text: str) -> str:
@@ -673,6 +713,56 @@ def cmd_upgrade(args) -> None:
     me.chmod(0o755)
     print(f"upgraded {rel} to {file_version(new_t)} (backup: .genome/genome.pre-upgrade)")
     subprocess.run([sys.executable, str(me), "migrate"], cwd=cfg.root)  # the new code runs its own config migrations
+    _post_upgrade_findings(cfg)
+
+
+def _post_upgrade_findings(cfg) -> None:
+    """Lint the repo that was just upgraded and print a numbered fix list.
+
+    An upgrade that ends on "upgraded X (backup: ...)" has answered the wrong
+    question. The operator does not want to know the file was replaced; they want to
+    know what is now broken in THIS repo and what to do about each item. Measured
+    2026-10-30: a KB eleven releases behind (`2026.10.27-13` against `-23`) carries
+    schema drift, and the run reported success — the errors were three
+    `genome migrate`-shaped commands away and nobody printed them.
+
+    This runs the new CLI's own lint in-process, so no import or subprocess is
+    needed, and prints each finding with its remedy. It never fails the upgrade:
+    the swap already happened, and exiting non-zero afterwards would tell the
+    dispatcher the upgrade failed when it did not."""
+    try:
+        found = run_lint(cfg)
+    except Exception as e:  # a lint crash must not undo or misreport an upgrade
+        print(f"note: post-upgrade lint could not run ({e}) — `genome lint` to check manually")
+        return
+    if not found:
+        print(f"lint: clean [{', '.join(sorted(cfg.modules))}] — nothing to fix after the upgrade")
+        return
+    errs = [f for f in found if f.startswith("E")]
+    warn = [f for f in found if f[0] != "E"]
+    print(f"\npost-upgrade: {len(errs)} error(s), {len(warn)} warning(s) to fix in this KB")
+    for i, f in enumerate(sorted(errs) + sorted(warn), 1):
+        print(f"{i:>3}. {f}")
+    # The remedy is the point: a numbered list of codes without the command that
+    # clears each one turns this into another thing to research.
+    seen: dict[str, int] = {}
+    for f in found:
+        seen[f[:4]] = seen.get(f[:4], 0) + 1
+    fixes = []
+    if "E117" in seen:
+        fixes.append("`genome emit` (worklog zone is stale)")
+    if "E006" in seen:
+        fixes.append("`genome emit` (a generated zone was hand-edited or has broken markers)")
+    if "E104" in seen:
+        fixes.append("`genome outline` (outline zone is stale)")
+    if "E016" in seen:
+        fixes.append("move history out of the over-budget file (`genome archive`)")
+    if errs:
+        fixes.append("`genome lint --code E --all` lists every error; `genome doctor` explains each code")
+    if fixes:
+        print("remedies: " + "; ".join(fixes))
+    if errs:
+        print("after fixing: `genome close` re-checks everything above")
 
 
 def cmd_migrate(args) -> None:

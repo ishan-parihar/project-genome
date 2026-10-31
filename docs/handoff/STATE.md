@@ -3,6 +3,52 @@
 Current snapshot only (no history: that is the worklog). The first `## ` block is
 what `genome wake` shows.
 
+## State — 2026-10-31, after the upgrade mechanism was made honest and the scoped test became possible
+
+- **The fleet is 77 vendored CLI files across 77 repos, and 75 of them sit at
+  `2026.10.27-13`** — ten releases behind the tip. The four skills roots sit at
+  `2026.10.30-22`, one release behind the kernel (`2026.10.30-25`). A `-13 → -25` swap
+  is **807 lines added, 6 removed** per copy. The registry knows every vendored repo:
+  79 of its 81 vendored/kb rows resolve to a real directory and 77 hold `scripts/genome`,
+  exactly the on-disk set. Two rows point at nothing (`holon-personal` and its nested twin).
+- **The upgrade mechanism had ten gaps, and the operator's sanctioned scoped test was
+  impossible to perform.** `--roots` was parsed and then ignored (the dispatch body had
+  zero references to it), so every "scoped" run was a fleet run by another name. Verified
+  against `HEAD` by extraction and grep, not by recollection.
+- **The bootstrap failure was mathematical, not cosmetic, and is now closed.** A dispatch
+  from `-23` delegated to each repo's own old CLI, whose `skill_copy()` hardcoded one of
+  four skills roots at `-22` — so the fleet could only ever converge on the last thing
+  install.sh published, never on the tip. Reproduced in a sandbox both ways (`-13 → -22`
+  unset, `-13 → -23` with `GENOME_SKILL` at the release). Fixed by three changes that only
+  work together: the reference is `max(running CLI, registered floor)`, the dispatch hands
+  each child `GENOME_SKILL` (an env var every shipped version already honours), and
+  `skill_copy()` probes all four roots plus the kernel working tree and takes the newest.
+- **An upgrade now ends with a numbered fix list, not with "upgraded X".**
+  `_post_upgrade_findings()` runs this CLI's own lint after the swap and prints each
+  finding with the command that clears it. It never fails the upgrade: exiting non-zero
+  afterwards would tell the dispatcher the swap failed when it did not.
+- **A scope that matches nothing now dies (exit 2) instead of printing the all-clear.**
+  `--roots no-such-repo` used to print `dispatch: nothing to upgrade (every registered
+  copy is at …)` — the single most dangerous line the mechanism can produce, because the
+  operator reading it concludes the fleet is current.
+- **The registry can now forget.** `genome installs unregister <path>` is new: exact path
+  first, then an unambiguous name match. `project-genome` is refused (it matches 4 rows)
+  rather than dropping rows the operator never named.
+- **All suites green at `2026.10.30-25`:** `test_genome` 38/38, `test_package` 8/8,
+  `test_package_modes` 5/5, `check_ps1` parity ok at 412 lines, `genome close` green,
+  and the wheel bytes equal `scripts/genome` bytes equal the ledger's `-25` checksum.
+- **Three packaging failures were a stale `dist/`, not a code defect.** Both artefacts
+  still carried `-23` mid-session and the byte-parity cases failed until `uv build` was
+  re-run. A `build.py` guard also refused to rewrite a released checksum, which forced
+  the VERSION bump that uncovered the stale-artefact path — two independent guards
+  working. The unshipped `-24` ledger line was removed: no file on disk ever held those
+  bytes.
+- **Nothing was applied to the fleet.** No `--apply` on any repo, no publish, no
+  fleet-wide run. The procedure is written down in
+  `docs/audit/2026-10-30-UPGRADE-MECHANISM-AUDIT.md`; its steps 1 and 4 are the
+  operator's call. That audit also records a corrected figure: the release gap is **10**
+  releases, not the eleven the previous session summary carried.
+
 ## State — 2026-10-30, after the installer rework made one command deliver both
 
 - **The cold-start install now delivers the CLI *and* the skill from one line.**

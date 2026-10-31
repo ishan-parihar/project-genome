@@ -118,3 +118,52 @@ RUNBOOK parity note, and the AGENTS loci table. The skills-root audit that order
 `docs/audit/2026-10-30-SKILLS-ROOT-AUDIT.md`.
 - **2026-10-31T02:53** — the skills-root audit re-measured: the zcode chain is 207 links, not 43 — the published count was broken
 - **2026-10-31T03:50** — the skills-root audit re-measured a second time: three of its own figures corrected, one claim retracted outright
+
+## 2026-10-31 — the upgrade mechanism had ten gaps, and the scoped test was impossible
+
+The operator asked to bring every genome-managed KB under `~/Documents/github/my-projects` to the
+latest kernel, under a standing ruling: **scoped runs only, `--apply` always after a dry run, never a
+full fleet bootstrap on this machine.** The first question is whether that is one command. At
+`ffc95f1` it was not.
+
+**The fleet, measured:** **77 vendored CLI files across 77 repos** (the kernel's own
+`scripts/genome` is the 78th on disk and one more sits inside `.genome-backups`; both excluded), of which
+**75 sit at `2026.10.27-13`**, `operant` at `2026.10.21-2`, `artificial-route` at `2026.10.22-17`.
+The four skills roots all sit at `2026.10.30-22`, **one release behind the kernel**. Ten releases
+separate `-13` from `-23` (corrected from the eleven this session's summary carried — derived from
+`releases.txt`, not remembered), and a `-13 → -25` swap is **807 lines added, 6 removed** per copy.
+
+**Ten gaps, each verified against `HEAD:scripts/genome` by extraction and grep, not by recollection.**
+The one that mattered most is not a reporting gap but a **mathematical one**: `--roots` was parsed
+and then ignored (the dispatch body had zero references to it), so every "scoped" run was a fleet run
+by another name — the operator's sanctioned test could not be performed at all. And even with scope
+fixed, a dispatch from `-23` delegated to each repo's own old CLI, whose `skill_copy()` hardcoded one
+of four skills roots at `-22`, so the fleet could only ever converge on **the last thing install.sh
+published**, never on the tip. Reproduced in a sandbox both ways: `-13 → -22` with the environment
+unset, `-13 → -23` with `GENOME_SKILL` pointed at the release. That is a bootstrap problem, and no
+amount of per-repo fixing would have closed it, because the reference and the source were both wrong.
+
+**Five fixes** (`src/16b_installs.py`, `src/18c_federation.py`, `src/19_main.py`, VERSION `-23 → -25`):
+the dispatch takes `roots` and **dies rather than print an all-clear** when the scope matches nothing;
+the reference becomes `max(running CLI, registered floor)`; the dispatch hands each child `GENOME_SKILL`,
+an env var every shipped version already honours, so no repo needs the new code to receive the right
+source; `skill_copy()` probes all four roots **plus the kernel working tree** and takes the newest; and
+a new `installs unregister` verb lets the registry forget (2 ghost rows had been inflating every
+target count). The operator's second ask — name what to fix inside each KB — is
+`_post_upgrade_findings()`: after the swap, this CLI's own lint runs and prints a numbered list with the
+command that clears each item, and it never fails the upgrade, because exiting non-zero afterwards
+would tell the dispatcher the swap failed when it did not.
+
+**One test assertion was wrong and was narrowed, not relaxed.** The `kb_registry` case forbade the
+skill root appearing anywhere in the dispatch output — which the new honest swap-source line
+legitimately does. It now checks the *target lines*, and asserts the swap-source line is present.
+
+**Verified:** `test_genome` 38/38, `test_package` 8/8, `test_package_modes` 5/5, `check_ps1` parity ok
+at 412 lines, `genome close` green, wheel bytes == `scripts/genome` bytes == the ledger's `2026.10.30-25`
+checksum. Three packaging failures along the way were a **stale `dist/`** (both artefacts still carried
+`-23`), not a code defect — recorded in the audit so the next run does not re-diagnose it.
+
+**Deliberately NOT done:** no `--apply` on any repo, no publish, no fleet-wide run. The procedure is
+written down in the audit; steps 1 and 4 are the operator's call. The audit is
+`docs/audit/2026-10-30-UPGRADE-MECHANISM-AUDIT.md`.
+- **2026-10-31T06:20** — the audit's own G9 claim re-derived from HEAD: a silent child prints the bare exit status, it does not crash; corrected in place

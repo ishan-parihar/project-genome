@@ -145,16 +145,17 @@ def main() -> None:
     s.add_argument("--at", help="freeze the spec as committed at this ref (backfilling a pre-registration)")
     add("secrets", cmd_secrets, "scan staged+unstaged diffs for configured secret values")
 
-    s = add("installs", cmd_installs, "the machine's genome installs: list | verify | register | scan | upgrade")
-    s.add_argument("installs_cmd", choices=["list", "verify", "register", "scan", "upgrade"])
+    s = add("installs", cmd_installs, "the machine's genome installs: list | verify | register | unregister | scan | upgrade")
+    s.add_argument("installs_cmd", choices=["list", "verify", "register", "unregister", "scan", "upgrade"])
     s.add_argument("kind", nargs="?", help="register: skill | bin | vendored | kb")
-    s.add_argument("path", nargs="?", help="register: the install path (absolute or ~)")
+    s.add_argument("path", nargs="?", help="register: the install path (absolute or ~); unregister: the row to forget")
     s.add_argument("--note")
     s.add_argument("--apply", action="store_true", help="upgrade: actually perform the upgrades (default: dry run)")
     s.add_argument("--against-shipped", action="store_true", dest="against_shipped",
                    help="verify: compare every install against the freshest skill/bin copy, not against its own registration")
     s.add_argument("--roots", nargs="*", default=None,
-                   help="scan: directories to sweep for activated genomes (genome.toml / kb.toml) the manifest does not know")
+                   help="scan: directories to sweep for activated genomes (genome.toml / kb.toml) the manifest does not know; "
+                        "upgrade: scope the dispatch to these installed names or paths")
 
     s = add("kb", cmd_kb, "the machine's knowledge bases: list | show | lint (reachable from anywhere)")
     s.add_argument("kb_cmd", choices=["list", "show", "lint"])
