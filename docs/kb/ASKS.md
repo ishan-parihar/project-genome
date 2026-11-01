@@ -5,6 +5,7 @@ A ruling is done only when its owner doc or record carries it.
 
 | id | asked | status | question | ruling | applied |
 |---|---|---|---|---|---|
+| Q1 | 2026-11-01 | open | The vendored-copy convention reverted two fleet upgrades within an hour of landing them. Do we (1) keep vendoring and make 'installs verify --against-shipped' a scheduled drift check, (2) keep vendoring but record each repo's ownership intent in the manifest note so a writer knows before it touches a copy, or (3) migrate the 76 vendored copies to PATH installs? Option 3 is the protocol's ratification item 5 and removes the revert class entirely, but needs each repo owner's consent. | — | — |
 
 **Recorded 2026-10-30 — none logged by this seat, deliberately.** The one question this
 session would naturally raise is *"should the 75-repo CLI upgrade run now?"*, and it is

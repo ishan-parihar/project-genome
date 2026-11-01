@@ -340,3 +340,58 @@ pioneer-qf's `E301` — an owner-map row only that venture's owner can write. `t
 `genome close` green, commit `0c108cb` pushed.
 - **2026-11-01T00:27** — the two integrity gates were proved on the live estate, not only in the sandbox. The release ledger: one comment line appended to `webdev/quant-signals/scripts/genome` while it still claimed `2026.10.31-40`, and `genome installs verify --against-shipped` answered `0 behind, 0 unknown, 1 corrupted — claims 2026.10.31-40 but its bytes differ from the release (a hand-edit, a partial write, or the wrong restore)`, naming the reason and not just the category. Restored from the pre-edit copy, and the estate read `all 85 registered install(s) at the shipped version 2026.10.31-40` again. The restore step nearly failed its own lesson — the backup path collided with a directory the script had just `mkdir`'d, so `cp` refused with `-r not specified; omitting directory` and the repo stayed tampered for one verify run; the file was recovered from `<dir>/genome` and both shas matched (`11bf845430e0`). **A backup step that can silently not happen is the same class of defect as the gate it exists to unblock**: the script now copies to a file path, and this line records that the first script did not.
 - **2026-11-01T00:28** — the schema gate measured across the estate: **all 76 repos declare `schema_version = 2`**, 0 at 1, 0 absent. `E018` therefore fires nowhere today, which is the correct reading — it is a gate against a future hand-edit or a schema-3 release, not a finding. Its two proof shapes are the sandbox case in `upgrade_integrity` (declared-1 errors, migrate clears it, undeclared stays tolerated) and the estate measurement recorded here.
+
+## 2026-11-01 — the remaining gaps, re-measured, and the fleet is not as uniform as it looked
+
+The operator asked for an outline of the remaining implementation gaps. The honest answer
+started by re-measuring what the register and the previous outline claim, and five of those
+claims did not survive it.
+
+**The frontier moved, so the old plan's Tier 1 numbering is void.** The 2026-10-30 outline
+reserved **E018** for the protocol's lint-time gate. This repo shipped E018 on 2026-11-01 for
+the `schema_version` gate. Re-derived from the shipped script (`grep -oE 'E0[0-9]{2}'
+scripts/genome | sort -u`): live flat max is E018, **E019 and E020 are free**, no M-code exists
+anywhere. The addendum's own instruction covers exactly this — *"If a future genome version
+consumes E018/E019 before this protocol lands, shift to the next free flat codes and record the
+shift here the same way"* — so the new outline numbers the gates **M017 / E019 / E020** and cites
+the instruction. A numbering plan is a claim about a frontier that moves.
+
+**The register's evals figure is wrong twice.** `PQ-6` says "16 evals and 108 fixtures".
+Measured from `evals/evals.json`: 16 evals (ids 5–20) and **86 assertions** — there is no fixture
+count at all (`fixtures` is a build glob: `evals/make_fixtures.py /var/tmp/genome-eval new old`),
+and the countable number is assertions, not fixtures. **Two numbers copied where one was wrong.**
+
+**PQ-3's mechanism is wrong but its outcome is right, and PQ-4 diagnosed the wrong cause.**
+The sdist (59 files) does not contain `project_genome/_genome.py` — but installing it DOES produce
+one, because pip builds a wheel from the sdist and the wheel's `force-include` applies. Measured:
+a fresh sdist install from a neutral cwd reports `genome 2026.10.31-40` and resolves
+`site-packages/project_genome/_genome.py` at sha `11bf845430e0`, identical to the wheel and to
+the live `scripts/genome`. So the `__init__.py` docstring's fallback story is not what modern pip
+does. Meanwhile **`test_package_modes` failed live, and not for the reason the register gives**:
+`the sdist and the wheel install DIFFERENT CLI bytes: a9263e5bbe53 vs 11bf845430e0` — the stale
+`dist/` sdist still held the `-34` build. It failed **identically from `/` and from the repo
+root**, so PQ-4's cwd claim is not the cause; one `uv build` cleared it. **PQ-4 and PQ-5 are one
+trap with two wrong diagnoses.**
+
+**The largest gap is one nobody had named: the fleet is not uniformly current, and the
+dispatch did nothing wrong.** 75 of 76 vendored copies hold `2026.10.31-40`. Two are back at
+`2026.10.27-13`: `pioneer-qf/bin/genome` (its reflog: `reset: moving to HEAD`, 07:06 local, after
+a 06:01 commit) and `holon/holon/vendor/genome.py` + its `scripts/genome` symlink (rewritten
+07:40 local with no commit above a 22:56-UTC HEAD). Both reverts happened **after** the swaps had
+landed, from outside the dispatch — the disk gate would have fired at the time and did not,
+because the bytes were right then. What the estate lacks is a check that a copy is *still*
+current, which is what `installs verify --against-shipped` run later is for, and it is what found
+both. **An upgrade that succeeds and is then undone by the next `git checkout` is not an upgrade
+that succeeded** — that is the convention question, and it is the operator's.
+
+**Written:** `docs/plans/2026-11-01-remaining-implementation-gaps-outline.md` (four tiers, dated,
+superseding the 2026-10-30 one). The old outline was archived with `genome archive`, which left a
+tombstone and cleared `W006` ("both answer the same question") with `lint_root_placement`'s new
+exemption — the second time this session that exemption earned itself on live work. Its routing
+row in AGENTS.md was relinked, and the new plan carries a TOC so it does not trip the W010 it
+asks other work to avoid. **A plan that asks for a TOC and has none is the same defect it is
+describing.**
+
+Also found and recorded: **E018 shipped with no row in `references/lint-rules.md`** (the table
+has 14 flat E rows, none for E018) — a shipped code a reader cannot look up.
+- **2026-11-01T02:31** — the census table's `holon` row names the mechanism as "rewritten 07:40 local with no commit above a 22:56-UTC HEAD", and that is as far as the evidence goes: the file's mtime is 07:40 local and the last commit above it is from 22:56 UTC the previous day. What *wrote* it — a checkout, a reset, a pull, an editor restoring a stale buffer — is not distinguishable from the reflog alone, and the outline says so rather than guessing.
