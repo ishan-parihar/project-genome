@@ -91,7 +91,7 @@ def _verify_against_shipped(rows: list) -> None:
     me = _file_version(Path(__file__).read_text())
     if _version_key(me) > _version_key(ref):
         ref = me
-    behind, unknown = [], []
+    behind, unknown, tampered = [], [], []
     for r in rows:
         v = live[r["path"]]
         if v in ("missing", "none"):
@@ -100,14 +100,83 @@ def _verify_against_shipped(rows: list) -> None:
             behind.append((r, v))
         elif _version_key(v) == (0,) * 4:
             unknown.append((r, v))
+        elif not _matches_ledger(Path(r["path"]), v):
+            # A copy that claims a released version but does not carry that release's
+            # bytes. This is the integrity question the install-time check exists for:
+            # a hand-edit, a bad merge, a file restored from the wrong backup, or a
+            # partial write all look like a valid release from the version line alone.
+            # The fleet's whole premise is that a vendored copy is the released file,
+            # so a copy that is not reported CORRUPTED is a copy the operator cannot
+            # trust — and it would otherwise pass this check as clean.
+            tampered.append((r, v))
     for r, v in behind:
         print(f"BEHIND  {r['kind']:8} {r['path']} — {v}, shipped is {ref}")
     for r, v in unknown:
         print(f"UNKNOWN {r['kind']:8} {r['path']} — version {v!r} does not compare (a local stamp?)")
-    if not behind and not unknown:
+    for r, v in tampered:
+        print(f"CORRUPTED {r['kind']:6} {r['path']} — claims {v} but its bytes differ from the release "
+              f"(a hand-edit, a partial write, or the wrong restore)")
+    if not behind and not unknown and not tampered:
         print(f"verify: all {len(rows)} registered install(s) at the shipped version {ref}")
         return
-    die(f"{len(behind)} behind, {len(unknown)} unknown (shipped {ref})", ERR)
+    die(f"{len(behind)} behind, {len(unknown)} unknown, {len(tampered)} corrupted (shipped {ref})", ERR)
+
+
+def _release_ledger() -> dict[str, str]:
+    """VERSION -> sha256 from the release ledger, or {} when no ledger is on the machine.
+
+    The ledger lives beside the SKILL copy (`scripts/releases.txt`), which is the
+    published source of truth, not beside each vendored copy. Measured 2026-10-31: a
+    vendored repo holds `scripts/genome` and no `releases.txt` at all — so a check that
+    looked beside every copy would find nothing on the entire fleet and report the
+    estate clean. That is the defect this whole function exists to catch, reproduced
+    inside the fix: reading the ledger from the copy instead of from the publisher.
+
+    The kernel checkout counts too, since on a development day its ledger is ahead of
+    the last publish and the operator is iterating against it."""
+    for c in (Path("~/.agents/skills/project-genome/scripts/releases.txt").expanduser(),
+              Path("~/.claude/skills/project-genome/scripts/releases.txt").expanduser(),
+              Path("~/.codex/skills/project-genome/scripts/releases.txt").expanduser(),
+              Path("~/.zcode/skills/project-genome/scripts/releases.txt").expanduser(),
+              Path(__file__).resolve().parent.parent / "scripts" / "releases.txt"):
+        if c.is_file():
+            out = {}
+            for ln in c.read_text(errors="replace").splitlines():
+                parts = ln.split()
+                if len(parts) >= 2 and not ln.startswith("#"):
+                    out[parts[0]] = parts[1]
+            if out:
+                return out
+    return {}
+
+
+def _matches_ledger(path: Path, version: str) -> bool:
+    """True when a copy's bytes are the released bytes for its own VERSION.
+
+    A copy whose sha matches the ledger is the release; one that does not is local, and
+    the caller says so rather than trusting a version line a local edit left in place.
+    This is the integrity question: without it, a hand-edit, a partial write, a bad
+    merge, and a restore-from-the-wrong-backup are all indistinguishable from a genuine
+    release, because each of them left the version line alone.
+
+    Three states are deliberately NOT failures. A version with no ledger entry (an
+    unreleased build the operator is iterating on, or a fork's own stamp), a path that is
+    not a file (a register mistake, which `missing` already reports), and an unreadable
+    file all return True: calling them corrupted would fail every machine
+    mid-development. A False is reserved for bytes that provably differ from a release
+    that IS recorded — the state where the operator has to look."""
+    script = _script_of(path)
+    if not script.is_file():
+        return True
+    ledger = _release_ledger()
+    known = ledger.get(version, "")
+    if not known:
+        return True
+    try:
+        actual = hashlib.sha256(script.read_bytes()).hexdigest()
+    except OSError:
+        return True
+    return actual.startswith(known)
 
 
 def _script_of(path: Path) -> Path:
@@ -312,6 +381,7 @@ def _dispatch_upgrade(rows: list, apply: bool, roots: list | None = None) -> Non
         else:
             print(f"swap source: {swap_source} ({sv})")
     ok = skipped = failed = 0
+    broken_out: list[tuple] = []  # (row, old_version, reason, child_output): upgraded, but left broken
     for r, cli, v in targets:
         cmd = [sys.executable, str(cli), "upgrade"] + (["--apply"] if apply else [])
         try:
@@ -322,9 +392,38 @@ def _dispatch_upgrade(rows: list, apply: bool, roots: list | None = None) -> Non
             failed += 1
             continue
         out = (res.stdout + res.stderr).strip()
+        # THE VERDICT IS THE CHILD'S, NOT THE DISPATCH'S. `upgrade` exit 0 means the
+        # swap happened, and a swap that leaves the KB broken still returns 0 — the
+        # post-upgrade finding list only ever goes to stdout. Measured 2026-10-31 on
+        # the live estate: the fleet run reported `dispatch: 74 ok` while one repo had
+        # been left with a stale records zone the new CLI correctly caught, and the
+        # fleet's own summary said nothing was wrong. So the dispatcher reads the
+        # verdict the child already printed and reclassifies: a child whose post-upgrade
+        # list names errors is NOT ok, whatever its exit status.
+        broken = _child_broken(out)
+        # THE SWAP IS ALSO VERIFIED ON DISK. A child that printed `upgraded ... to
+        # <ref>` and exited 0 has still only CLAIMED it moved: the file could be
+        # unchanged (a permissions hiccup in atomic_write's rename), land on the wrong
+        # bytes (a stale GENOME_SKILL), or be half-written. Re-reading the copy after
+        # the child exits is the one check that cannot be fooled by a report. This is
+        # the integrity gate the operator asked for, and it runs whether the child
+        # succeeds or fails: a repo claiming a successful swap that did not happen is
+        # the state that must never read as green.
+        if apply and res.returncode == 0:
+            landed = _version_of(Path(r["path"]))
+            if landed != ref:
+                broken = broken or f"the copy is {landed} on disk, not {ref}"
         if res.returncode == 0:
-            ok += 1
-            print(f"{'upgraded' if apply else 'would upgrade':14} {r['path']}  {v} → {ref}")
+            if not broken:
+                ok += 1
+                print(f"{'upgraded' if apply else 'would upgrade':14} {r['path']}  {v} → {ref}")
+            else:
+                # The swap succeeded, so the file moved — the KB needs a fix, not a
+                # retry, and the line must say so. Reporting `ok` here is the whole
+                # defect: it is the line an operator scans, and a `dispatch: 74 ok`
+                # summary over a fleet with a broken member reads as a green fleet.
+                broken_out.append((r, v, broken, out))
+                print(f"{'upgraded but BROKEN':22} {r['path']}  {v} → {ref}  ({broken})")
             # The new lint output is part of the result, not noise: a fleet run that
             # prints only the version line leaves every post-upgrade fix list unread.
             # The header is the line an operator scans for, so it is named explicitly
@@ -362,9 +461,50 @@ def _dispatch_upgrade(rows: list, apply: bool, roots: list | None = None) -> Non
             why = (out.splitlines()[0] if out else
                    "exit " + str(res.returncode) + " (no output — run it directly: " + " ".join(cmd) + ")")
             print(f"ERROR  {r['path']} — {why}")
+    # A copy that upgraded but was left broken is its OWN category: it is not ok (the
+    # KB needs a fix), not failed (the swap worked, a retry would not help), and not
+    # skipped (nothing refused). Folding it into `ok` is what made a broken fleet report
+    # itself green, so it is counted separately, printed with its fix list, and it fails
+    # the run: a fleet that finished with a broken member has NOT finished.
+    if broken_out:
+        for r, v, why, out in broken_out:
+            print(f"\nBROKEN {r['path']} — {why}")
+            for line in out.splitlines():
+                s = line.strip()
+                if s.startswith("post-upgrade:") or s.startswith("remedies:") \
+                        or s.startswith("after fixing:") or re.match(r"^\d+\. ", s):
+                    print(f"        {s}")
+        print(f"\ndispatch: {ok} ok, {len(broken_out)} upgraded but BROKEN, "
+              f"{skipped} skipped (local patch), {failed} failed")
+        die(f"{len(broken_out)} copy/copies upgraded but left broken — "
+            f"`genome fleet lint` shows them, fix each then re-run", ERR)
     print(f"\ndispatch: {ok} ok, {skipped} skipped (local patch), {failed} failed")
     if failed:
         die(f"{failed} copy/copies failed to upgrade", ERR)
+
+
+def _child_broken(out: str) -> str:
+    """A child upgrade's own post-upgrade verdict, or '' when the child reported none.
+
+    The child prints `post-upgrade: <N> error(s), <M> warning(s) to fix in this KB` after
+    it swaps. Errors there are the new CLI saying this KB is now wrong, which is the one
+    signal a dispatcher cannot see in the exit code: the swap succeeded and the operator
+    still has work to do.
+
+    Only ERRORS count. Warnings are advice about prose this release found, and an estate
+    of 77 KBs carries 100 of them by design — treating them as breakage would fail every
+    run for the normal state of the world, which is how a gate gets disabled.
+
+    Returns the reason as a phrase for the line, so the dispatcher's report names what
+    is wrong instead of just counting it."""
+    for ln in out.splitlines():
+        s = ln.strip()
+        if not s.startswith("post-upgrade:"):
+            continue
+        m = re.search(r"(\d+)\s+error", s)
+        if m and int(m.group(1)) > 0:
+            return s.replace("post-upgrade:", "").strip()
+    return ""
 
 
 def cmd_installs(args) -> None:

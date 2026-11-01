@@ -3,6 +3,47 @@
 Current snapshot only (no history: that is the worklog). The first `## ` block is
 what `genome wake` shows.
 
+## State — 2026-11-01, after the fleet upgrade shipped (`2026.10.31-40`)
+
+- **Every vendored copy in the estate holds the same release.** Measured against the
+  canonical skills root, all **76 vendored repos** sit at `2026.10.31-39` (sha `f08be22396f1`
+  from `-38`, re-verified after the `-39` dispatch), the kernel and the four skills roots
+  are at `-39`, and the installed uv tool reports `genome 2026.10.31-39`. The three
+  non-canonical roots are still symlinks into `~/.agents`, not copies.
+- **One fleet run reported a lie and the harness now guards against it.** A `--apply`
+  piped through `tail` printed `dispatch: 75 ok, 0 skipped, 0 failed` while **no vendored
+  file had changed** (76 repos probed: every byte still `-34`, sha `a9263e5bbe53`, zero
+  pre-upgrade backups). The pipe held the children open and truncated their writes; the
+  post-swap disk re-read could not fire because no child had run. The same dispatch written
+  to a file gave **70 upgraded, 69 ok, 1 upgraded but BROKEN**. Every fleet run now writes
+  its log to a file, and `_version_of` after the swap is the only claim that counts.
+- **The one BROKEN member was right, and the kernel was wrong.** `operant` carried
+  `E306 PLAN_SESSION_PICKER_UPGRADE.md: no role points here` on the tombstone the archive
+  workflow itself writes. `misplaced_paths()` now exempts a tombstoned root file, in the
+  place that decides, so `lint` and `close` share the same set. Proven on the repo that
+  caused it: `-38` lints 1 error, `-39` lints clean.
+- **The hardening at `-39`:** `_child_broken()` reads the child's `post-upgrade: N error(s)`
+  verdict so a broken swap is `upgraded but BROKEN` and fails the run (exit 2);
+  `_release_ledger()` calls a copy whose sha256 differs from `scripts/releases.txt`
+  `CORRUPTED`, and the ledger lives beside the *skill* copy because a vendored repo carries
+  no `releases.txt` at all; and `E018` makes a **declared-but-behind** `schema_version` an
+  error, because an unmigrated repo reads every glob with the old dialect and reports clean.
+- **A second round of the same class, closed by one shape.** `-39` fixed the kernel's own
+  `E005` false positive (a live test file that *documents* the tombstone rule read as one),
+  but `holon`'s vendored copy of the CLI carried the same whole-body search and fired
+  `E005` twice on `holon/vendor/genome.py`. `is_tombstone()` now anchors the marker to the
+  head of the document — where `cmd_archive` writes it, line 3 — and all three call sites
+  (E005, the duplicate-title pass, the placement exemption) share that one predicate.
+- **All suites green at `2026.10.31-40`:** `test_genome` **39/39**. `layout_invariant`
+  asserts a real tombstone passes and a prose mention at line 400 does not;
+  `kb_registry` asserts the new `upgraded but BROKEN` exit-2 behaviour instead of the old
+  exit-0 one — **the fixture had been asserting the defect.**
+- **The estate is measured clean but for one owner's file.** `genome fleet lint` reads
+  **82 KB(s), 1 error, 102 warnings, 1 with no CLI**. The one error is `pioneer-qf`'s
+  staged, unlisted prereg (`PREREG-2026-11-01-te6-exit-placebo.md`), which needs an
+  owner-map row only that venture's owner can write. The kernel, holon and operant all
+  lint clean. All 76 vendored repos hold the identical release (sha `11bf845430e0`).
+
 ## State — 2026-10-31, after `genome fleet` unified the three upgrade surfaces (`2026.10.31-34`)
 
 - **The estate is now one verb away: `genome fleet`.** It answers what is behind, takes it

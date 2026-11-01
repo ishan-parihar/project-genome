@@ -166,6 +166,8 @@ def _remedies_for(codes) -> str:
         fixes.append("`genome outline` (outline zone is stale)")
     if "E016" in seen:
         fixes.append("move history out of the over-budget file (`genome archive`)")
+    if "E018" in seen:
+        fixes.append("`genome migrate` (an unmigrated schema reads every membership glob with the old dialect)")
     if "W006" in seen:
         fixes.append("two plans answer one question — keep one owner, retire the other")
     if "W008" in seen:

@@ -59,12 +59,37 @@ MODULE_ROLES = {
 }
 APPEND_ONLY = ("ledger", "worklog", "feed", "prereg", "quarantine")
 TOMBSTONE = re.compile(r"<!--\s*kb: tombstone target=\"([^\"]+)\"")
+TOMBSTONE_HEAD = 8  # lines; a tombstone marker is a document header, not a sentence in it
+
+
+def is_tombstone(text: str) -> bool:
+    """True when this text IS a tombstone, not when it merely mentions one.
+
+    A tombstone is a root-level pointer the archive workflow leaves behind: a heading,
+    then the `<!-- kb: tombstone target="..." -->` marker, then where it went. That
+    marker is a header, so it lives in the first few lines.
+
+    Searching the whole body instead is a false-positive machine. Measured 2026-11-01
+    on the live estate: the kernel's own `scripts/test_genome.py` documents this rule
+    in a comment, so `TOMBSTONE.search(read(f))` matched it and `E005` fired on
+    `AGENTS.md` for pointing at a live, passing test file. Any document that explains
+    the mechanism is read as the mechanism. The duplicate-title pass has the same
+    shape: it tests `"kb: tombstone" in body`, which a prose mention satisfies.
+
+    Anchoring to the head closes all three at once, and it is the honest shape: a
+    marker buried at line 400 is not what `genome archive` writes.
+    """
+    for ln in text.splitlines()[:TOMBSTONE_HEAD]:
+        if TOMBSTONE.search(ln):
+            return True
+    return False
+
 ZONE_RE = re.compile(r"<!-- genome:zone (\S+) sha=([0-9a-f]+) -->\n(.*?)<!-- genome:end \1 -->", re.S)
 ERR = 2
 MIN_CHUNK = 5  # lines; `ask` hits narrower than this point at a lead line without its content
 HUB_NODE_CAP = 3000  # nodes; above this `graph hubs` ranks by degree and says betweenness was not computed
 _TMP_SEQ = itertools.count()  # makes each atomic_write temp name unique within this process too
-VERSION = "2026.10.31-34"
+VERSION = "2026.10.31-40"
 # every key genome reads: an unknown key is a typo that would silently switch a check off (E017)
 CONFIG_KEYS = {
     "genome": {"modules", "schema_version"},

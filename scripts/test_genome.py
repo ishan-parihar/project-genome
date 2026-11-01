@@ -547,6 +547,48 @@ def layout_invariant(base: Path) -> None:
     assert "E306 ORPHAN.md" in out, out
     cl = run(root, "close", "--no-gate", ok=False).stdout
     assert "ORPHAN.md" in cl and "git add -- ORPHAN.md" not in cl, cl
+    # A TOMBSTONE AT THE ROOT IS NOT MISPLACED. Measured 2026-10-31 on the live
+    # fleet: post-upgrade `E306 PLAN_SESSION_PICKER_UPGRADE.md: no role points
+    # here` fired on operant, on the file `genome archive` itself leaves behind —
+    # a root pointer whose only content is "this moved to docs/archive/X".
+    # Flagging it makes the prescribed act (move the doc, keep the pointer) an
+    # error, which leaves the operator to commit an error or drop the pointer.
+    # Every other check already honours the marker; this is the placement rule
+    # joining them. AND a tombstone does not silence the rule for its neighbours:
+    # a tombstone beside an orphan still leaves the orphan reported.
+    (root / "TROVE.md").write_text('# TROVE (superseded)\n\n<!-- kb: tombstone target="docs/archive/TROVE.md" -->\n\nMoved on 2026-10-31.\n')
+    (root / "ORPHAN.md").write_text("# Orphan\n\nA note nobody routes to.\n")
+    out = run(root, "lint", "--code", "E306", "--all", ok=False).stdout
+    assert "E306 ORPHAN.md" in out and "TROVE.md" not in out, out
+    # and `close`, which decides commit through the same misplaced_paths, must
+    # not hold the tombstone back: committing a pointer is the point of one.
+    # (The orphan is still withheld — that is the invariant's other half.)
+    cl = run(root, "close", "--no-gate", ok=False).stdout
+    addline = next((l.strip() for l in cl.splitlines() if "git add" in l), "")
+    assert "TROVE.md" in addline, cl
+    assert "ORPHAN.md" not in addline and "ORPHAN.md" in cl, cl
+    # removing the orphan leaves the tombstone legitimate and the lint clean
+    (root / "ORPHAN.md").unlink()
+    subprocess.run(["git", "rm", "-q", "--cached", "ORPHAN.md"], cwd=root, capture_output=True)
+    out = run(root, "lint", "--code", "E306", "--all", ok=False).stdout
+    assert "E306" not in out, out
+    # A DOCUMENT THAT DESCRIBES A TOMBSTONE IS NOT A TOMBSTONE. The predicate is
+    # anchored to the head of the file, which is where `genome archive` writes the
+    # marker, because the old whole-body search was a false-positive machine:
+    # measured 2026-11-01, the kernel's own `scripts/test_genome.py` (a live file,
+    # 39/39 passing) explains this rule in a comment, and `E005` fired on AGENTS.md
+    # for pointing at it — a doc that explains the mechanism read as the mechanism.
+    # The writer puts the marker on line 3, inside the window; a marker at line 400
+    # is not what any archive wrote.
+    import importlib.machinery, importlib.util as _iu
+    ld = importlib.machinery.SourceFileLoader("genome_mod_layout", G)
+    mod = _iu.module_from_spec(_iu.spec_from_loader("genome_mod_layout", ld)); ld.exec_module(mod)
+    real = '# TROVE (superseded)\n\n<!-- kb: tombstone target="docs/archive/TROVE.md" -->\n\nMoved on 2026-10-31.\n'
+    prose = ("# Suite notes\n\n" + "filler\n" * 400
+             + "the exemption: a file whose head carries the marker is a tombstone;\n"
+               "this comment says `<!-- kb: tombstone target=\"x\" -->` and is not one.\n")
+    assert mod.is_tombstone(real), real
+    assert not mod.is_tombstone(prose), "a prose mention at line 400 was read as a tombstone"
 
 
 @case
@@ -1549,13 +1591,22 @@ def kb_registry(root: Path) -> None:
     ap = _sp.run([sys.executable, G, "installs", "upgrade", "--roots", str(old), "--apply"],
                  capture_output=True, text=True, cwd=str(root), env={**os.environ, **env})
     target.write_text(kept_text)
-    assert ap.returncode == 0, (ap.returncode, ap.stdout, ap.stderr)
     body = ap.stdout
     assert "upgraded" in body and str(old) in body, body
     assert "post-upgrade:" in body, ("the fix-list header was filtered out", body)
     assert "remedies:" in body, ("the remedy line was filtered out", body)
     assert re.search(r"^\s*1\. E017", body, re.M), ("the numbered finding was filtered out", body)
     assert body.count("genome.toml: schema_version") <= 1, ("the child's first line printed twice", body)
+    # THE VERDICT IS THE CHILD'S, AND THIS FIXTURE IS WHY. `old` is deliberately broken
+    # (E017: an unknown genome.toml key), so its swap leaves an error behind — and the
+    # dispatch used to count that `ok` and exit 0, because the child exited 0 and the
+    # finding list only ever went to stdout. Measured on the live estate 2026-10-31:
+    # `dispatch: 74 ok, 0 failed` printed over a fleet with one broken member. Now the
+    # dispatch reads the child's own verdict, prints it, and fails.
+    assert "upgraded but BROKEN" in body, ("a broken swap was counted clean", body)
+    assert "1 upgraded but BROKEN" in body, body
+    assert "upgraded but left broken" in ap.stderr, ap.stderr
+    assert ap.returncode == 2, ("the run must fail when a member is left broken", ap.returncode)
 
 
 @case
@@ -1646,6 +1697,97 @@ def installs_registry(root: Path) -> None:
     assert run(root, "installs", "register", "wrong", str(sk), ok=False, env=env).returncode == 2
 
 
+@case
+def upgrade_integrity(root: Path) -> None:
+    """The two gates that make a fleet upgrade trustworthy: the swap is verified on disk, and a
+    copy that claims a release without its bytes is CORRUPTED rather than clean."""
+    import importlib.machinery
+    import types
+    man = root / "installs.json"
+    env = {"GENOME_INSTALLS": str(man), "HOME": str(root)}
+    # a skills root holding the current release, and the RELEASE LEDGER beside it — the
+    # publisher's copy, which is where the ledger lives. Measured 2026-10-31: a vendored
+    # repo carries `scripts/genome` and no `releases.txt`, so a check reading the ledger
+    # from beside each copy would find nothing on the whole fleet.
+    sk = root / ".agents/skills/project-genome"; (sk / "scripts").mkdir(parents=True)
+    shutil.copyfile(G, sk / "scripts" / "genome")
+    shutil.copyfile(Path(G).with_name("releases.txt"), sk / "scripts" / "releases.txt")
+    run(root, "installs", "register", "skill", str(sk), env=env)
+
+    # THE INTEGRITY GATE. A copy at the reference version whose bytes differ from the
+    # recorded release is a hand-edit, a partial write, or the wrong restore — and without
+    # this check all three read as a clean fleet, because the version line is the only
+    # thing either of them touched. Measured 2026-10-31 on the live estate: the gate
+    # existed nowhere, and `verify` had one category (behind) for a copy it could not
+    # distinguish from a genuine release.
+    good = root / "repos" / "gen"; (good / "scripts").mkdir(parents=True)
+    shutil.copyfile(sk / "scripts" / "genome", good / "scripts" / "genome")
+    (good / "genome.toml").write_text('[genome]\nmodules = ["core"]\n')
+    run(root, "installs", "register", "vendored", str(good), env=env)
+    v = run(root, "installs", "verify", "--against-shipped", env=env)
+    assert v.returncode == 0, f"an unmodified release must pass: {v.stdout}"
+    assert "CORRUPTED" not in v.stdout, f"an unmodified release must not be flagged: {v.stdout}"
+    assert "all 2 registered" in v.stdout, v.stdout
+
+    bad = root / "repos" / "bad"; (bad / "scripts").mkdir(parents=True)
+    shutil.copyfile(sk / "scripts" / "genome", bad / "scripts" / "genome")
+    (bad / "genome.toml").write_text('[genome]\nmodules = ["core"]\n')
+    # the smallest possible local change: one comment line. This is exactly what a stray
+    # edit, a bad merge, or a restored-from-the-wrong-backup copy looks like.
+    with open(bad / "scripts" / "genome", "a") as f:
+        f.write("\n# a local note nobody remembers making\n")
+    run(root, "installs", "register", "vendored", str(bad), env=env)
+    v = run(root, "installs", "verify", "--against-shipped", ok=False, env=env)
+    assert v.returncode == 2 and "CORRUPTED" in v.stdout, (v.returncode, v.stdout)
+    assert str(bad) in v.stdout and "differ from the release" in v.stdout, v.stdout
+    assert "1 corrupted" in (v.stdout + v.stderr), (v.stdout, v.stderr)
+    # and the reason names the remedy's shape: a copy that is not the release is neither
+    # a green copy nor merely behind
+    assert "hand-edit" in v.stdout or "partial write" in v.stdout, v.stdout
+
+    # THE VERDICT IS THE CHILD'S. The dispatcher's `ok` used to mean "the child exited 0",
+    # and a swap that leaves the KB broken exits 0. Measured 2026-10-31 on the live
+    # estate: `dispatch: 74 ok, 0 failed` printed while one repo had been left with a
+    # stale generated zone the new CLI had correctly caught. `_child_broken` reads the
+    # verdict the child already prints, so a broken member cannot be counted green.
+    loader = importlib.machinery.SourceFileLoader("genome_uut", G)
+    mod = types.ModuleType(loader.name); loader.exec_module(mod)
+    clean_child = """upgraded scripts/genome to 2026.10.31-35 (backup: .genome/genome.pre-upgrade)
+lint: clean [core, records] — nothing to fix after the upgrade"""
+    warn_child = """upgraded scripts/genome to 2026.10.31-35
+post-upgrade: 0 error(s), 3 warning(s) to fix in this KB
+remedies: link the unreachable docs page"""
+    broken_child = """upgraded scripts/genome to 2026.10.31-35
+post-upgrade: 1 error(s), 4 warning(s) to fix in this KB
+   1. E104 docs/RECORDS.md: zone `records` is stale — `genome rec emit`
+remedies: `genome rec emit` (worklog zone is stale)"""
+    assert mod._child_broken(clean_child) == "", "a clean child must not be called broken"
+    # Warnings are the estate's normal state (100 across the fleet by design): a gate that
+    # failed on warnings would fail every run, which is how gates get disabled.
+    assert mod._child_broken(warn_child) == "", "warnings are advice, not breakage"
+    got = mod._child_broken(broken_child)
+    assert got and "1 error" in got, f"a child naming errors must be called broken: {got!r}"
+
+    # THE SCHEMA GATE. A repo that DECLARES an old schema_version reads every membership
+    # glob with the wrong dialect, so its checks read the wrong patterns and report clean.
+    # Measured 2026-10-31 on the live machine: a schema-1 KB linted with 0 errors and no
+    # schema finding of any kind, while `genome migrate` rewrote it — the silent-failure
+    # shape, a check that cannot see the repo it is reading wrong. E018 closes it, and
+    # `genome migrate` is the remedy. A schema_version that is NOT declared stays
+    # tolerated: absent is not the same defect as declared-and-old, and the fixtures (and
+    # any pre-key repo) rely on that.
+    sr = root / "schema1"; sr.mkdir()
+    (sr / "genome.toml").write_text('[genome]\nschema_version = 1\nmodules = ["core"]\n')
+    l1 = run(sr, "lint", ok=False).stdout
+    assert "E018" in l1 and "schema_version 1" in l1, l1
+    assert "E018 genome.toml is schema_version 1; this CLI knows 2" in l1, l1
+    run(sr, "migrate")
+    assert "E018" not in run(sr, "lint").stdout, "migrate did not clear the schema gate"
+    # an undeclared schema is still tolerated, so a pre-key repo is not flagged as behind
+    (sr / "genome.toml").write_text('[genome]\nmodules = ["core"]\n')
+    assert "E018" not in run(sr, "lint").stdout, "an undeclared schema was flagged as behind"
+    # and the remedy names itself, through the same shared table the fleet printer uses
+    assert "genome migrate" in mod._remedies_for(["E018"]), mod._remedies_for(["E018"])
 
 
 @case

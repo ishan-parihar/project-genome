@@ -3,6 +3,24 @@
 def lint_core(cfg: Cfg) -> list[str]:
     out: list[str] = [f"E017 genome.toml: unknown key {k} (a typo here switches a check off silently)"
                       for k in cfg.unknown]
+    # AN UNMIGRATED SCHEMA IS AN ERROR, NOT A WARNING. A repo at schema_version 1 with a
+    # CLI that knows schema 2 reads every membership glob with the WRONG dialect — it
+    # matches at any depth where the CLI meant a top-level file — so every check over
+    # those patterns is checking the wrong thing and reporting clean. Measured 2026-10-31
+    # on the live machine: a schema-1 KB linted with 0 errors and no schema finding at
+    # all, while `genome migrate` happily rewrote it. That is the silent-failure shape:
+    # the lint cannot see a repo it is reading wrong, so the gate has to be the version.
+    #
+    # A schema_version that is NOT DECLARED is a different fact and stays a
+    # `genome init`-shaped one: the key is absent, so nothing was migrated away from
+    # anything, and calling that "behind" would flag every repo written before the key
+    # existed. 0 means undeclared here, because that is what the config reader defaults
+    # to, and an undeclared schema is not the same defect as a declared old one.
+    if 0 < cfg.schema_version < SCHEMA_VERSION:
+        fname = "kb.toml" if cfg.legacy else "genome.toml"
+        out.append(f"E018 {fname} is schema_version {cfg.schema_version}; this CLI knows "
+                   f"{SCHEMA_VERSION} — `genome migrate` (an unmigrated repo reads every "
+                   f"membership glob with the old dialect, so its checks read the wrong patterns)")
     out += lint_layout(cfg)   # root placement is a core invariant, not an ops option
     out += [f"W507 [paths] {k} is retired (no role uses it); `genome migrate` removes it" for k in RETIRED_PATHS
             if k in cfg.declared]
@@ -17,7 +35,7 @@ def lint_core(cfg: Cfg) -> list[str]:
         for n, t in pointers(text, ign):
             if not pointer_exists(cfg, t, names):
                 out.append(f"E001 {cfg.paths['agents']}:{n} points at missing `{t}`")
-            elif "/" in t and (cfg.root / t).is_file() and TOMBSTONE.search(read(cfg.root / t)):
+            elif "/" in t and (cfg.root / t).is_file() and is_tombstone(read(cfg.root / t)):
                 out.append(f"E005 {cfg.paths['agents']}:{n} points at a tombstone `{t}`")
     elif cfg.form("agents")[0] == "file":
         out.append("W000 no agent contract (AGENTS.md) — the entry point for every future agent")
@@ -141,7 +159,7 @@ def lint_core(cfg: Cfg) -> list[str]:
         titles = []
         for f in sorted(plans.glob("*.md")):
             body = read(f)
-            if "kb: tombstone" in body:
+            if is_tombstone(body):
                 continue
             h = next((ln for ln in body.splitlines() if ln.startswith("#")), "")
             titles.append((f.name, set(re.findall(r"[a-z0-9]{4,}", h.lower()))))
@@ -433,6 +451,18 @@ def misplaced_paths(cfg) -> list[str]:
     always been. With the derived default the rule is scoped to documents,
     because a Cargo.toml, a LICENSE and a genome.toml are the repo's own
     machinery and flagging them would train the agent to ignore the check.
+
+    A TOMBSTONE IS NOT MISPLACED. Measured 2026-10-31 on the live fleet: the
+    post-upgrade sweep found `E306 PLAN_SESSION_PICKER_UPGRADE.md: no role
+    points here` in operant, on a file that is exactly what the archive
+    workflow writes — a root-level pointer whose whole job is to say "this
+    moved to docs/archive/X". Flagging it makes the one prescribed act
+    (move the document, leave the pointer) an error, so the operator's choices
+    reduce to committing the error or deleting the pointer and losing the
+    breadcrumb. Every other check already honours the marker: `lint_core`
+    skips a tombstoned plan in its duplicate-title pass (line 162 above), and
+    E005 fires when something *points* at one. This is that exemption, in the
+    place that decides, so `lint_root_placement` and `close` share it.
     """
     legal = legal_root_files(cfg)
     derived = cfg.get("ops", "root_files") is None
@@ -447,6 +477,8 @@ def misplaced_paths(cfg) -> list[str]:
             continue
         if derived and not name.lower().endswith((".md", ".markdown")):
             continue
+        if is_tombstone(read(cfg.root / f)):
+            continue    # a pointer into docs/archive is where it belongs
         out.append(f)
     return sorted(out)
 
