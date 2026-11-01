@@ -3,6 +3,38 @@
 Current snapshot only (no history: that is the worklog). The first `## ` block is
 what `genome wake` shows.
 
+## State — 2026-11-01, after the remaining gaps were re-measured (`2026.10.31-40`)
+
+- **The fleet is current in bytes and two copies are not, and both were reverted from
+  outside the dispatch.** Measured per registered row against
+  `~/.agents/skills/project-genome/scripts/genome`: **75 of 76 vendored copies hold
+  `2026.10.31-40`** (sha `11bf845430e0`). `pioneer-qf/bin/genome` and
+  `holon/holon/vendor/genome.py` (+ its `scripts/genome` symlink) sit at
+  `2026.10.27-13` again — pioneer-qf's reflog shows `reset: moving to HEAD` at 07:06
+  local after a 06:01 commit, holon's copy was rewritten at 07:40 local with no commit
+  above a 22:56-UTC HEAD. `installs verify --against-shipped` names exactly those two
+  BEHIND. **An upgrade undone by the next `git checkout` is not an upgrade that
+  succeeded** — Q1 asks the operator which of three conventions replaces vendoring.
+- **The live plan is `docs/plans/2026-11-01-remaining-implementation-gaps-outline.md`.**
+  It supersedes the 2026-10-30 one (archived, tombstone left, W006 cleared). Its Tier 1
+  numbering is **M017 / E019 / E020**, not the old M017/E018/E019, because this repo
+  minted **E018** on 2026-11-01 for the `schema_version` gate — re-derived from the
+  shipped script, live flat max E018, E019/E020 free, no M-code exists. Tier 0 is the
+  convention decision (Q1); Tier 2 is the stale-`dist/` trap closed in the gate.
+- **Five register/plan claims were wrong and are now re-measured:** the evals figure
+  (16 evals, **86 assertions**, no fixture count — `fixtures` is a build glob); PQ-3's
+  mechanism (pip builds a wheel from the sdist, so the install *does* carry
+  `_genome.py` at the right sha); PQ-4/PQ-5 (one trap — a stale `dist/`, proven by an
+  identical failure from `/` and from the repo root, cleared by one `uv build`); PQ-1
+  (two externally-reverted copies); PQ-9 (closed in fact, all roots at `-40`).
+- **The estate lints 82 KB(s), 1 error, 102 warnings, 1 with no CLI** — the error is
+  pioneer-qf's `E301`, an owner-map row only that venture's owner can write. The kernel
+  itself: `lint: 0 error(s), 1 warning(s)` (W010 on the append-only worklog),
+  `doctor: healthy`. `test_genome` 39/39 and the gate green at `2026.10.31-40`.
+- **A shipped code with no documentation row: E018 is absent from
+  `references/lint-rules.md`** (14 flat E rows, none for it). Recorded in the plan's
+  Tier 2 to be added with E019, so frontier and rows land in the same commit.
+
 ## State — 2026-11-01, after the fleet upgrade shipped (`2026.10.31-40`)
 
 - **Every vendored copy in the estate holds the same release.** Measured against the
