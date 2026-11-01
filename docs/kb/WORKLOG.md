@@ -309,3 +309,32 @@ is reported here rather than written.
 - **2026-11-01T00:19** — version corrected: the entry above says `-40` is what shipped to the fleet, and it is. The dispatch was written to a file (`/var/tmp/ishanp-agentic/apply40.log`), not a pipe, which is the rule this session learned the hard way.
 - **2026-11-01T00:20** — the `pioneer-qf` finding's *shape* is worth naming for the registry: E301 fires on an **untracked** file, because `tracked()` includes `git ls-files -co` — others as well as cached. A file nobody has committed is still in an owner location, and failing the KB for it is correct (the owner map must describe where things will live), but it is a different operator action from a committed, unlisted one. Left as-is; it is not a defect.
 - **2026-11-01T00:20** — the correction line above is itself wrong and is corrected here rather than edited. `E301` does **not** fire on an untracked file: `tracked()` reads `git ls-files` (cached only), and the pioneer-qf prereg is **staged** — `git status --porcelain` on it prints nothing because the index already holds it, and `git ls-files -s` shows `100644 b398a92… 0`. So the finding is on a file the owner has already `git add`ed and simply not yet listed in the owner map, which is the ordinary case the check exists for. My first run of `git status` came back empty and I read that as "untracked"; it means "staged and clean".
+
+## 2026-11-01 — the roots list was built from one kind of row, and the fleet misses what it does not list
+
+The full-estate `--apply` reached `verify: all 85 registered install(s) at the shipped version
+2026.10.31-40` — and got there through a gap worth naming. **`--roots` was assembled from
+`installs list` filtered to `vendored` rows, and `pioneer-qf` is registered as a `kb` row**, so it was
+never in the list. It stayed at `-34` while 76 repos moved, and the only reason it surfaced is that
+`installs verify --against-shipped` ran afterwards and said `1 behind` — a second measurement caught
+what the first one could not see.
+
+**This is the bin/genome gap's second face.** Phase 1 made a `bin/genome` vendor *visible* to the
+registry; it did not make it reachable by a scoping filter that asks only for `vendored` rows. A
+roster built by kind silently drops a KB that vendors its CLI, which is the exact shape of the
+invisible-install defect, moved from `verify` to `--roots`.
+
+**The correct scoping is what the tool already answers.** `genome fleet` alone is the glance, and
+`fleet list` groups by what the operator does about it — so the roots for a fleet run are the rows
+`fleet list` groups as `behind`, which it derives from `_version_of` per row, not from a kind.
+**A scoping list should come from the tool's own answer, not from a re-implementation of it.**
+
+**The one gate that earned its keep.** Applying to `pioneer-qf` printed `dispatch: 0 ok, 1 upgraded
+but BROKEN` over the file's own genuine error — `E301` on its staged, unlisted prereg. Before `-37`,
+that line read `1 ok` and the owner-map row stayed missing. Verified on the file that causes it: the
+copy landed (`-40`, sha `11bf845430e0`, matching the reference exactly).
+
+**Measured end state:** all 85 registered installs at `2026.10.31-40`; kernel, four skills roots and
+the uv tool at `-40`; `fleet lint` = **82 KB(s), 1 error, 102 warnings**, the error being
+pioneer-qf's `E301` — an owner-map row only that venture's owner can write. `test_genome` 39/39,
+`genome close` green, commit `0c108cb` pushed.
