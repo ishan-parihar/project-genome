@@ -203,6 +203,7 @@ Copying the CLI in keeps the genome self-sustaining: a future agent needs no ext
 | `references/records.md` | writing, amending or consolidating ADs / RGs; ID map; immutable vs amendable mode |
 | `references/research.md` | evidence classes, quarantine, hypotheses, pre-registration, evidence store, trial ledgers |
 | `references/ops.md` | housekeeping gates and their configuration; secrets; running-job guard |
+| `references/workspace-lint.md` | a working tree's declared shape: the `ops` layout gates, and the absorbed `workspace-lint` skill |
 | `references/agents.md` | the parallel-agent protocol: identity, claims, feed, boards |
 | `references/adoption.md` | adopting a repo, kb.toml migration, detaching from `arch`, worked `genome.toml` examples |
 | `references/lint-rules.md` | every E### / W### code, what it means, the fix |

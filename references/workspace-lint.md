@@ -1,0 +1,74 @@
+# workspace-lint → the `ops` module
+
+**Status:** absorbed into `project-genome` on 2026-11-02, by the meta-skill
+discipline: one skill per class of work, and this class already had an
+implementation with a lint catalogue behind it.
+
+`workspace-lint` was a standalone skill carrying a 441-line `workspace_lint.py`
+plus a per-project `workspace-lint.yaml`. It answered a real question — *is this
+working tree still shaped the way I declared it?* — and it answered it with a
+second linter beside the one genome already runs.
+
+Nothing was lost, but nothing was copied either, and that is the honest account:
+**the second linter is not needed, because the same rules are already kernel
+checks with codes and configuration keys.** The two overlapped almost exactly,
+which is the reason to merge rather than to vendor side by side.
+
+## What maps to what
+
+| `workspace_lint.py` does | genome's own equivalent |
+|---|---|
+| `structure.canonical` — dirs that must exist, with a purpose | **E306** `ops.dir_requires` (a dir missing its required file) + **E301** the ownership map |
+| `rules.root` — files allowed at the root | **E306** `ops.root_files` |
+| suffix / extension placement rules | **E306** `ops.dir_suffixes` |
+| `rules.forbid` — patterns that must not appear | **E305** tracked bulk, **E303** dead link citations |
+| orphaned files at the root | **E301** (a tracked file with no owner row) |
+| duplicate directories, stray `__pycache__` / `.pyc` / `.log` | **E305** regenerable bulk + `.gitignore`, which genome never fights |
+| git hygiene | `git status` / `close`'s staleness checks; **E307** an escaping symlink |
+| the validator script itself | `genome lint` — one stdlib file, no PyYAML |
+
+That last row is the load-bearing difference. `workspace_lint.py` imports PyYAML
+and therefore needs an installed dependency; the kernel's standing rule is that
+the CLI stays **one stdlib-only file** so `copy-one-file` installability holds.
+A second linter that needs a dependency breaks the property the whole design
+rests on, for a job the stdlib one already does.
+
+## What to do instead
+
+1. `genome lint` — it reports every structural violation above, by code.
+2. Configure the shape you want in `genome.toml`, not in a second config file:
+
+```toml
+[ops]
+root_files = "README.md AGENTS.md LICENSE"
+dir_suffixes = { docs = "md", scripts = "py|sh" }
+dir_requires = { docs = "INDEX.md" }
+bulk_allow = []      # regenerable bulk may be tracked, with a reason
+owner_globs = ["docs/**/*.md"]
+```
+
+3. The per-project half stays per-project, exactly as before. The config moved;
+   it did not become global. `workspace-lint.yaml`'s content belongs in
+   `[ops]`, one repo at a time.
+4. `genome ask "<question>"` finds which section owns an answer without reading
+   the whole reference tree.
+
+## The one thing to actually port
+
+If a repo already has a `workspace-lint.yaml`, do not hand-transcribe it blindly.
+The two schemas differ in one way that matters: `workspace-lint` declares a
+**canonical directory list** and asks "is anything missing or extra", while
+`ops.dir_requires` declares **per-directory obligations** and asks "is each
+directory satisfying its own contract". A canonical list can express "docs/
+must exist"; `dir_requires` can express "docs/ must exist *and* must contain
+INDEX.md", which is the rule that was silently unenforceable before.
+
+Read `references/ops.md` for the full gate set and the configuration keys.
+
+## What was not ported, and why
+
+`workspace_lint.py --fix` auto-remedies violations by moving files. Genome has
+no equivalent, deliberately: every housekeeping gate here **fails closed and
+tells you the command** (E306 names `move or rename the file`) rather than
+mutating the tree. An agent that silently relocates files breaks paths other
+agents mid-run are holding. The fix is a suggestion the operator applies.
