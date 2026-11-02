@@ -121,7 +121,15 @@ measures is the one built from the current tree.
 
 ---
 
-## Tier 0 — the vendored copy, its two reverts, and the convention (PQ-1, PQ-9)
+## Tier 0 — the vendored copy, its three un-current rows, and the convention (PQ-1, PQ-9)
+
+> **Corrected 2026-11-02.** The census below measured 75 of 76 and missed one. Running
+> `installs verify --against-shipped` for the first time (Tier 0.1's step 1, never executed)
+> names **three** un-current rows, not two, and `holon` is not among the names it prints at
+> all. The measurement was wrong for two reasons: an unrun check, and a table built from the
+> registry's recorded `version` instead of from disk. See the 2026-11-02 (later still)
+> worklog entry for the full re-measurement, including that **operant's own worklog already
+> ruled on its copy and the answer is option 3**.
 
 ### 0.1 Establish the estate's true version census, and name who moved each copy
 
@@ -130,9 +138,10 @@ against `~/.agents/skills/project-genome/scripts/genome`):
 
 | copy | version | sha | how it diverged |
 |---|---|---|---|
-| 75 vendored repos | `2026.10.31-40` | `11bf845430e0` | — (the 2026-11-01 apply) |
-| `pioneer-qf/bin/genome` | `2026.10.27-13` | `979625c8aba8` | reflog `reset: moving to HEAD` 07:06 local, after its 06:01 commit |
-| `holon/holon/vendor/genome.py` (+symlink) | `2026.10.27-13` | the `-13` bytes | file rewritten 07:40 local, no commit above a 22:56-UTC HEAD |
+| 73 vendored rows | `2026.10.31-40` | `11bf845430e0` | — (the 2026-11-01 apply) |
+| `pioneer-qf/bin/genome` | `2026.10.27-13` | `979625c8aba8` | reflog `reset: moving to HEAD` 07:06 local, after its 06:01 commit. **A `kb` row, not vendored** — an activated genome (no `scripts/` copy at all) |
+| `holon/holon/vendor/genome.py` (+ a `scripts/genome` **symlink** into it) | `2026.10.27-13` | the `-13` bytes | file rewritten 07:40 local, no commit above a 22:56-UTC HEAD. Not printed by `installs verify` at all — the symlink target is a question that check does not ask |
+| `agentic-harness/operant/scripts/genome` | `2026.10.21-2` | `ee03491721ed` | **committed** at `-21-2` with a clean working tree: never reverted, never upgraded. Rollback artefacts `.genome/genome.pre-upgrade` (`-39`) and `genome.pre-2-full` from 2026-11-01 show an upgrade run that reached `-39` and was rolled back. Nine releases behind, 5 `fleet-hold-*` WIP branches, 3 stashes, 12 uncommitted crate files |
 
 **This is not a dispatch failure and must not be recorded as one.** The disk-gate change
 (`_version_of` after the swap) reads `landed != ref` and would have fired; it did not fire at
@@ -168,9 +177,14 @@ today are the argument. The three exits, with the one measurement each needs:
    row (the manifest already carries `note`), so a writer knows a repo is actively owned before
    a dispatch touches it. Small, and it turns today's surprise into a named expectation.
 3. **Migrate to PATH installs (`PATH-genome` + a thin shim).** The protocol's item 5. It
-   removes the revert class entirely and makes the estate's version a single fact, but it is
-   a change to 76 repos' tooling and needs their owners' consent, so it cannot be this seat's
-   unilateral call.
+   removes the revert class entirely and makes the estate's version a single fact. It is a
+   change to 76 repos' tooling and needs their owners' consent — but **one owner has already
+   consented, in writing, with a measurement.** operant's 2026-10-28 worklog ruled on its own
+   copy: *"the vendored scripts/genome copy is fork-without-intent (2026.10.21-2 vs
+   2026.10.22-17, 485 diff lines) and should be deleted in favor of the PATH install +
+   `genome upgrade`"*, and that PATH install already works (`~/.local/bin/genome` → the uv
+   tool). So the cost is not 76 consents; it is 75, one of which is already resolved, and
+   operant's nine-release gap is the strongest single argument for the option.
 
 **Exit:** the operator names 1, 2, or 3 in `docs/kb/ASKS.md` (as a ruled row, with an
 `--applied` owner path). Until then Tier 0's only code change is the census note of 0.1.

@@ -491,3 +491,55 @@ machine-local by construction — the protocol's own answer is that state does n
 go in git and the rendered read-view does), and it wants the operator's
 ratification before it is global. The two open rows, Q1 and this, are both
 operator decisions, and neither has been answered from this seat.
+
+## 2026-11-02 (later still) — the census was wrong by one repo, and the missing row is the interesting one
+
+Tier 0.1's step 1 was never run: I had asserted "the two BEHIND rows" without ever
+executing `installs verify --against-shipped` over the estate. Run now:
+
+```
+genome: 2 behind, 0 unknown, 0 corrupted (shipped 2026.10.31-40)
+BEHIND  vendored /home/…/agentic-harness/operant — 2026.10.21-2, shipped is 2026.10.31-40
+BEHIND  kb       /home/…/pioneer-qf               — 2026.10.27-13, shipped is 2026.10.31-40
+```
+
+**Two errors in yesterday's census, both mine.**
+
+1. **`operant` was never in it.** It is the estate's third un-current copy and the
+   oldest, at `2026.10.21-2` — **nine releases** behind the tip. Its census row is
+   absent entirely, so the "75/76 current" figure was really 74/76.
+2. **`holon` does not appear in the verify output at all**, though it is in the
+   registry at `2026.10.27-13`. It is not a third BEHIND row, it is a sixth kind of
+   problem: `holon/scripts/genome` is a **symlink** into `holon/holon/vendor/`, and
+   verify's `kb`/`skill`/`bin` row arms resolve their own filenames. Whether the
+   symlink target is current is a question verify does not answer today, and that
+   blind spot is worth a row of its own in Q1's options.
+
+**Operant is a different class from the two reverts, and the evidence says so.**
+
+- `scripts/genome` is committed at `-21-2` with a **clean working tree** — it was
+  not reverted by a checkout, it was never upgraded.
+- `.genome/` holds two rollback artefacts from 2026-11-01: `genome.pre-upgrade`
+  (`-39`, sha `da39bb6e6a27`) and `genome.pre-2-full` (`-21-2`). So an upgrade ran
+  there, reached `-39`, and was rolled back.
+- It is an actively developed fork: **5 `fleet-hold-*` branches of in-flight WIP, 3
+  stashes, 12 uncommitted crate files.** A dispatch into that tree is not the same
+  act as a dispatch into a dormant repo.
+- And its own worklog already ruled on its copy, on 2026-10-28: *"the vendored
+  scripts/genome copy is **fork-without-intent** (2026.10.21-2 vs 2026.10.22-17, 485
+  diff lines) and should be deleted in favor of the PATH install + `genome
+  upgrade`."* A PATH install already exists and works: `~/.local/bin/genome` →
+  the uv tool.
+
+**What this changes.** Q1's option 3 I called "needs each repo owner's consent"
+as a cost. Operant shows it is also the option one owner has *already consented to
+and recorded*, with a measurement and a reason. So the honest framing for the
+operator is not "3 of 76 repos are behind" but **"one of the three names where the
+convention question is live has already answered it, and the answer is option 3."**
+`pioneer-qf` is a `kb` row (an activated genome, not a vendored copy — a *fourth*
+kind), and the registry's recorded `version` field is a claim, not a measurement:
+74 `vendored` rows still say `2026.10.27-13` on disk that has long since been
+swapped, so the registry cannot be used as a census until something refreshes it.
+
+Left alone, per 0.1: operant's working tree, pioneer-qf's checkout, holon's symlink
+target. The three backups and the 5 `fleet-hold` branches are someone else's work.

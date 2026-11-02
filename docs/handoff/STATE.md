@@ -3,6 +3,39 @@
 Current snapshot only (no history: that is the worklog). The first `## ` block is
 what `genome wake` shows.
 
+## State — 2026-11-02, after the census was corrected by running the check (`2026.10.31-40`)
+
+- **The estate census was wrong by one repo, and the missing row is nine releases behind.**
+  Tier 0.1's step 1 — `genome installs verify --against-shipped` — was never executed;
+  running it now names **`agentic-harness/operant` BEHIND at `2026.10.21-2`** (sha
+  `ee03491721ed`, clean tree, so it was *never upgraded*, not reverted) alongside
+  `pioneer-qf`. Verbatim: `2 behind, 0 unknown, 0 corrupted`. It carries 2026-11-01
+  rollback artefacts (`.genome/genome.pre-upgrade` at `-39`, `genome.pre-2-full`) showing an
+  upgrade that reached `-39` and was rolled back, 5 `fleet-hold-*` WIP branches and 3 stashes.
+  **And its own 2026-10-28 worklog already ruled on its copy**: *fork-without-intent — should be
+  deleted in favor of the PATH install + `genome upgrade`*. So the true figure is **73/76
+  vendored rows current**, not 75/76.
+- **Two structural facts the census hid.** `pioneer-qf` is a **`kb` row** (an activated genome
+  with no `scripts/` copy at all), a fourth kind beside vendored/skill/bin — so "the estate's
+  copies" is not one population. And `holon/scripts/genome` is a **symlink** into
+  `holon/holon/vendor/genome.py`, a target `installs verify` does not resolve, so holon is
+  invisible to the fleet-wide check rather than measured by it. Q1's options now carry that.
+- **The gate builds before it measures, and a stale `dist/` fails by name.**
+  `[core] gate` starts with `uv build --wheel --sdist`; `test_package_modes.py` refuses aged
+  or absent artefacts with `stale dist/: … uv build first` instead of two unexplained hashes.
+  Measured both directions. **PQ-5 closed in code, PQ-4 closed as a non-issue.** E018 has its
+  row in `references/lint-rules.md`, and the lint-code catalogue is current (15 E / 10 W flat,
+  free **E019/E020/E021**). Full gate green: `uv build` → 39/39 → 8/8 → 5/5 → `--check` →
+  `check_ps1`, exit 0.
+- **Tier 1 is a missing module, not a renumbering.** `modules = ["core", "records"]`, the
+  protocol says *"Status: upgrade proposal. Nothing here is implemented yet"*, and
+  `grep -rl transients src/` is 0 files, so `tadopt` + the transients register must land
+  before `M017`/`E019`/`E020`. Landing `E019` unaided turns 9 dated files red.
+- **Both remaining rows are the operator's**: **Q1** (the vendored-copy convention, where
+  operant's own record is evidence for option 3) and Tier 1's ratification of the `kb`
+  protocol. No working tree has been written to: operant's crate WIP, pioneer-qf's checkout,
+  and holon's symlink target are all left alone.
+
 ## State — 2026-11-02, after the stale-`dist/` trap closed in the gate (`2026.10.31-40`)
 
 - **The gate now builds before it measures, so it cannot report the build system's state as the
