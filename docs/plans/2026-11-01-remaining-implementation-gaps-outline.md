@@ -175,7 +175,17 @@ today are the argument. The three exits, with the one measurement each needs:
 **Exit:** the operator names 1, 2, or 3 in `docs/kb/ASKS.md` (as a ruled row, with an
 `--applied` owner path). Until then Tier 0's only code change is the census note of 0.1.
 
-## Tier 1 — the protocol's three gates, renumbered from the shipped frontier (PQ-2, PQ-10)
+## Tier 1 — the protocol's three gates need the `kb` module first (PQ-2, PQ-10)
+
+> **Corrected 2026-11-02.** This section previously read "renumbered from the shipped
+> frontier". Measured against the code, that framing is wrong: the three codes rest on a
+> store that does not exist. `modules = ["core", "records"]`; the `kb` subcommand that
+> exists is the machine's KB registry, not this protocol's module; the protocol itself
+> says *"Status: upgrade proposal. Nothing here is implemented yet"*; `grep -rh 'f"M0'
+> src/*.py` is **0**, so M017 would be the first M-code, not the next; and
+> `grep -rl transients src/` is **0 files**. Read this tier as: build `tadopt` and the
+> transients register first, then the gates on top. See the 2026-11-02 (later)
+> worklog entry for the full measurement.
 
 Numbering is re-derived, not remembered, and it differs from the 2026-10-30 outline because
 **E018 has been taken since**. Command: `grep -oE 'E0[0-9]{2}' scripts/genome | sort -u` (live

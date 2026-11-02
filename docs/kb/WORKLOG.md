@@ -450,3 +450,44 @@ gate is really about.
 Full gate green as the new string: `uv build` → `test_genome` 39/39 →
 `test_package` 8/8 → `test_package_modes` 5/5 → `build --check` → `check_ps1`.
 Exit 0, and the build now precedes the measuring by construction.
+
+## 2026-11-02 (later) — Tier 1 re-measured, and it is a new module, not a renumbering
+
+The outline I wrote yesterday frames Tier 1 as "the protocol's three gates,
+**renumbered** from the shipped frontier". That framing is wrong, and the error is
+the same class as the ones the outline exists to catch: it trusts the plan's own
+words over the code.
+
+**Measured, in order:**
+
+- `modules = ["core", "records"]` in `genome.toml`. The protocol's scope is a
+  `kb` module this repo does not run.
+- The `kb` subcommand that *does* exist — `genome kb list | show | lint` — is
+  the machine's knowledge-base registry. It is not the protocol's module, and
+  its name is why the claim reads plausibly.
+- `docs/plans/2026-10-28-KB-MANAGEMENT-PROTOCOL.md` says, verbatim on its second
+  line: **"Status: upgrade proposal. Nothing here is implemented yet."**
+- `grep -rh 'f"M0' src/*.py` → **0**. There is no M-code namespace in the source
+  at all, so M017 is not "the next M-code", it is the first one.
+- `grep -rl transients src/` → **0 files**. No transients register exists, and
+  `genome tadopt` does not exist as a subcommand.
+
+So the three codes rest on a store that does not exist: M017 refuses to mint
+while a transients row is unapproved, E019 flags a dated plan with no transients
+row, E020 the one-active-per-agent count. Tier 1's own step 1 ("`genome tadopt` —
+it must exist first, or the gate is a wall between a repo and its own history") is
+the honest dependency, and it gates every step after it. **A wall between a repo
+and its own history is exactly what E019 would be if it landed without `tadopt`**,
+which is why the order cannot be inverted.
+
+**Also measured for the cost of landing E019 unaided:** 9 dated files in
+`docs/plans` + `docs/audit` (4 plans, 5 audits, including the archived 2026-10-30
+outline) would go red on the day it shipped. The outline's "small back-fill" is
+only small *after* `tadopt` exists to adopt them with.
+
+**Nothing in Tier 1 has been started.** It is a new module with a sqlite write
+model, six tables, `never_commit` already carrying `.genome/**` (so the store is
+machine-local by construction — the protocol's own answer is that state does not
+go in git and the rendered read-view does), and it wants the operator's
+ratification before it is global. The two open rows, Q1 and this, are both
+operator decisions, and neither has been answered from this seat.
