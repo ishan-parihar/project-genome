@@ -3,7 +3,43 @@
 Current snapshot only (no history: that is the worklog). The first `## ` block is
 what `genome wake` shows.
 
-## State — 2026-11-02, after the census was measured from disk and the tier inverted
+## State — 2026-11-02, after the whole estate reached the shipped version (2026.11.02-43)
+
+- **The fleet is byte-current. Zero rows behind.** `installs verify --against-shipped`
+  answers `all 89 registered install(s) at the shipped version 2026.11.02-43`, exit 0.
+  The same command this morning answered `81 behind`. The dispatch ran, the four
+  skill roots and the global uv binary were brought up, and the one row upgrades
+  could not reach on its own was reached by hand: **`operant`, at `2026.10.21-2`,
+  committed and clean, nine releases back.**
+- **Why it needed a hand.** The dispatch delegates to each repo's own vendored CLI,
+  and that nine-release-old build refuses its own swap when the file's checksum does
+  not match the recorded release. The escape hatch is `--accept-patch-loss`, safe here
+  because the old CLI writes `.genome/genome.pre-upgrade` and `.genome/local-patch.diff`
+  (196 KB) before it touches anything. The 1883/67 diff was release drift, not local
+  work — recorded in the commit that landed it (`chore(genome): vendor the CLI at
+  2026.11.02-43`, operant `724b1996`). Its 8 in-flight Rust files were left unstaged.
+- **The remaining question is unchanged and still not this seat's: 72 rows hold the
+  shipped bytes without having committed them.** The disk says `-43`, HEAD says older,
+  and ` M scripts/genome` is one `git restore` away in each. `verify` reads the disk, so
+  it reports all of them healthy; the UNCOMMITTED class is now printed but deliberately
+  not gated on the exit code, because a repo that intentionally gitignores its copy is
+  healthy. Whether each row is tracked or generated is 72 owners' call, not one ruling.
+- **The skill roots are symlinks at one canonical copy, and that is the answered shape.**
+  `.claude`, `.zcode` and `.codex` each hold a *relative* link at
+  `~/.agents/skills/project-genome` (computed, not hardcoded — a fixed `../.agents/…`
+  resolves to `~/.claude/.agents/…`, which is the second broken link the installer's
+  sandbox test caught). All four now serve `2026.11.02-43`.
+- **The outward surface is folded in.** `doc` and `install-script-creator` were
+  standalone skills whose subject met the genome at the same seam; both are now
+  references (`references/docs.md`, `references/installer.md`) with their validators
+  under `scripts/docs/`, and the two old directories are compatibility aliases. The
+  third, `operant/skills/workspace-lint`, was absorbed as a *router* to the `ops`
+  module rather than a fourth copy — the kernel already owned that job class with
+  codes. Nothing was deleted anywhere.
+- **What this seat has not done, and will not unilaterally:** commit any of the 72
+  uncommitted rows, or touch operant's `fleet-hold` branches and 3 stashes.
+
+## State — 2026-11-02, after the census was measured from disk and the tier inverted (superseded above)
 
 - **The fleet upgrade landed. All of it. Nothing committed it.** Running the census
   the plan actually specifies (sha256sum per registered row against the shipped reference,
