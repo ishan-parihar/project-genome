@@ -189,6 +189,45 @@ today are the argument. The three exits, with the one measurement each needs:
 **Exit:** the operator names 1, 2, or 3 in `docs/kb/ASKS.md` (as a ruled row, with an
 `--applied` owner path). Until then Tier 0's only code change is the census note of 0.1.
 
+### 0.1b The census, as measured on 2026-11-02 from disk and HEAD
+
+The table above was written by narrating the plan's command and reading the registry's
+`version` column, which is a recorded claim. Measured properly — `sha256sum` per
+registered row against `~/.agents/skills/project-genome/scripts/genome` (resolving
+symlinks), then `git show HEAD:<path>` and `git status --short` for the same path —
+the estate is:
+
+```
+reference: 11bf845430e0  2026.10.31-40
+rows: 85   current=11  behind=3  nofile=3  uncommitted=68
+```
+
+| class | count | what it means | does `installs verify --against-shipped` see it? |
+|---|---|---|---|
+| current | 11 | disk == the shipped bytes, git agrees | yes |
+| **uncommitted** | **68** | **disk holds `2026.10.31-40`; HEAD holds an older `scripts/genome` with ` M` in `git status`** | **no** |
+| behind | 3 | `operant` (committed, clean, `2026.10.21-2`), `pioneer-qf` (a `kb` row), and `~/.local/bin/genome` (the uv tool, `8f6a1f0661da`) | yes |
+| nofile | 3 | two `skill` rows that are directories with no CLI, and the meta-root `kb` row with no local CLI | n/a |
+
+**The 68 uncommitted rows are the finding, and they dissolve this tier's premise.** The
+`-40` dispatch to those repos landed correctly and completely — the guard's write was
+right — and then nothing committed it. In `webdev/webdev-portfolio` the uncommitted
+diff is `1 file changed, 1639 insertions(+), 16 deletions(-)`, disk version
+`2026.10.31-40`, and `git status` → ` M scripts/genome`. The copies are not
+gitignored.
+
+So there is no revert class to instrument: `pioneer-qf` is the one genuine revert;
+`holon` is current-on-disk-but-uncommitted (not the revert the first census claimed);
+`operant` is the never-upgraded class. **The guard verifies that a write landed, and
+nothing verifies that it stayed landed** — 68 repos are one `git restore`, `checkout .`,
+rebase or `clean -fd` away from a nine-release regression, while `installs verify`
+reports them healthy.
+
+Not decided here, because it is 68 owners' call: whether each uncommitted row should be
+committed, and whether `scripts/genome` should be gitignored in repos that treat it as
+build output. The reproducible measurement (disk / HEAD / registry claim, per row) is
+`census.py` under `/var/tmp/ishanp-agentic/`, and it writes nothing.
+
 ## Tier 1 — the protocol's three gates need the `kb` module first (PQ-2, PQ-10)
 
 > **Corrected 2026-11-02.** This section previously read "renumbered from the shipped

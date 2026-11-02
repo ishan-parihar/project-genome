@@ -3,6 +3,37 @@
 Current snapshot only (no history: that is the worklog). The first `## ` block is
 what `genome wake` shows.
 
+## State — 2026-11-02, after the census was measured from disk and the tier inverted
+
+- **The fleet upgrade landed. All of it. Nothing committed it.** Running the census
+  the plan actually specifies (sha256sum per registered row against the shipped reference,
+  resolving symlinks, then asking git what HEAD holds) measures: **85 rows = 11 current,
+  3 behind, 3 nofile, and 68 UNCOMMITTED** — `2026.10.31-40` on disk with an older
+  `scripts/genome` at HEAD and ` M scripts/genome` in `git status`. In
+  `webdev/webdev-portfolio` that diff is `1 file changed, 1639 insertions(+), 16 deletions(-)`.
+- **This dissolves Tier 0's premise.** There is no revert class to instrument: yesterday's
+  "2 reverts" came from reading the registry's `version` column and inventing a git story
+  from it. Measured: `pioneer-qf` is genuinely behind (a `kb` row, no `scripts/`), `holon`
+  is **current on disk but uncommitted**, `operant` is genuinely behind at `2026.10.21-2`,
+  committed and clean, nine releases back.
+- **And the estate's own check cannot see the real problem.** `installs verify
+  --against-shipped` reads disk and answers `2 behind, 0 unknown, 0 corrupted` — it never
+  asks git, so 68 repos whose working trees are one `git restore` / `checkout .` / `clean
+  -fd` away from a nine-release regression are reported as fine. **The guard verifies a write
+  landed; nothing verifies it stayed landed.** That is the gap, and it is one rung below Q1.
+- **The gate is green and current regardless of that.** `[core] gate` builds before it
+  measures; a stale `dist/` fails by name; PQ-5 closed in code and PQ-4 as a non-issue;
+  E018 has its row; the catalogue is current (15 E / 10 W, free E019/E020/E021). Full gate
+  exit 0: `uv build` → 39/39 → 8/8 → 5/5 → `--check` → `check_ps1`.
+- **Tier 1 is a missing module, not a renumbering** — the `kb` protocol is an unratified
+  proposal scoped to a module this repo does not run; `tadopt` + the transients register
+  come first.
+- **What this seat has not done, and will not unilaterally:** commit any of the 68
+  uncommitted upgrades (68 owners' trees, each with its own WIP — holon's +1639 is real
+  work, not noise), touch operant's `fleet-hold` branches, or re-apply any write. The
+  reproducible census tool runs the three-way disk/HEAD/registry question in about a
+  second and writes nothing.
+
 ## State — 2026-11-02, after the census was corrected by running the check (`2026.10.31-40`)
 
 - **The estate census was wrong by one repo, and the missing row is nine releases behind.**

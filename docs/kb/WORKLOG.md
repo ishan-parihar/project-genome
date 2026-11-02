@@ -543,3 +543,109 @@ swapped, so the registry cannot be used as a census until something refreshes it
 
 Left alone, per 0.1: operant's working tree, pioneer-qf's checkout, holon's symlink
 target. The three backups and the 5 `fleet-hold` branches are someone else's work.
+
+## 2026-11-02 (correction) — holon was never reverted, and the census row I wrote for it was wrong
+
+The 2026-11-01 census recorded `holon` as one of **two reverts**: *"copy rewritten
+07:40 local, no commit above a 22:56-UTC HEAD"*, reverted to `2026.10.27-13` by
+external git operations. **That is not what the disk says, and I had not measured
+holon on disk — I had read the registry's `version` column.**
+
+Measured now:
+
+- `holon/scripts/genome` → **symlink** to `holon/holon/vendor/genome.py`.
+- The symlink target is **`11bf845430e0`, i.e. `2026.10.31-40`** — the reference
+  bytes. `installs list` reports holon at `2026.10.31-40` and `installs verify
+  --against-shipped` does **not** name it. It is *current*.
+- So the `-13` figure came from the registry row, which is a recorded claim, not a
+  measurement — the same wrong column that missed operant, now shown to be wrong in
+  both directions: it can name a repo behind that is fine, and omit one that is not.
+- `_script_of` resolves symlinks and `_version_of` reads through the resolution, so
+  the machinery was right all along. My census was not.
+
+**And the mechanism I invented for holon is also wrong.** Its vendor copy was
+rewritten at 2026-11-01 **08:49** local, but not by a revert:
+
+- `git show HEAD:holon/vendor/genome.py` → **`2026.10.27-13`**, sha `a8459ff41835`.
+- The working tree holds **`2026.10.31-40`**, sha `11bf845430e0`.
+- `git status` → **`M holon/vendor/genome.py`**: 1359 insertions, 125 deletions,
+  **uncommitted**.
+
+So holon is not a revert. It is the state the vendored-copy guard exists to
+*prevent being overwritten*: someone's upgrade write is correct, current, and sitting
+in a working tree with no commit above it. It is the exact opposite of the failure I
+documented — the write landed and is still right, but **nothing in the estate knows
+it is right, because every check that would say so reads the registry or HEAD rather
+than the bytes on disk.**
+
+Which turns the whole census table around. Yesterday's "2 reverts" is really:
+
+| row | truth on disk | how I got it wrong |
+|---|---|---|
+| `operant` | `2026.10.21-2`, committed, clean — never upgraded | not in the census at all; the registry names it, nothing measured it |
+| `pioneer-qf` | `2026.10.27-13`, genuinely behind, `bin/genome`, a `kb` row | correct |
+| `holon` | **`2026.10.31-40`, uncommitted** — current in the working tree | read from the registry's `version` column, and diagnosed as a revert |
+
+The census is *two rows* wrong in *opposite directions*, and both errors are the same
+error: **a table written from the registry instead of from `sha256sum` against the
+shipped reference.** The plan's own stated command — `sha256sum <repo>/scripts/genome
+| cut -c1-12` per registered row, against `~/.agents/skills/project-genome/scripts/genome`
+— would have measured all three correctly. It was never run as a loop; it was
+narrated.
+
+Left alone: holon's uncommitted `-40` write (committing it is the owner's call, not
+mine), operant's tree and its five `fleet-hold` branches, pioneer-qf's checkout.
+
+**Q1's honest shape, after this correction:** the revert class that started this
+whole tier is **one repo** (`pioneer-qf`), not two. `operant` is the never-upgraded
+class. `holon` is an uncommitted-correct-write class that no check can see, and it is
+the class that argues for option 3 most sharply — an estate whose version lives in
+one registered fact cannot have a correct-but-invisible copy.
+
+## 2026-11-02 (the measurement that inverts the tier) — the upgrade landed. All of it. Nothing committed it.
+
+Running the census the plan actually specifies — `sha256sum` per registered row
+against the shipped reference, resolving symlinks, and *separately* asking git what
+HEAD holds — produced a table nothing in the last three commits predicted:
+
+```
+reference: 11bf845430e0  2026.10.31-40
+rows: 85   current=11  behind=3  uncommitted=68  nofile=3
+```
+
+**68 of 85 rows hold `2026.10.31-40` on disk** and something older at HEAD, with
+`M scripts/genome` in `git status`. The `-40` upgrades to those repos are **written
+and uncommitted** — not a single repo, not a revert, the entire fleet. In
+`webdev/webdev-portfolio`: `1 file changed, 1639 insertions(+), 16 deletions(-)`,
+disk `2026.10.31-40`, and `git status --short` → ` M scripts/genome`.
+
+**This is the single largest correction of the session, and it dissolves the tier I
+have been writing.**
+
+- There is no revert class to instrument. Yesterday's "2 reverts" came from reading
+  the registry's `version` column, a recorded claim, and diagnosing a git story from
+  it. `pioneer-qf` is genuinely behind; `holon` is current-but-uncommitted; `operant`
+  is genuinely behind and never upgraded. One revert, not two, and it is the smallest
+  of the three.
+- **The dispatch to 68 repos succeeded and its result is invisible to git.** Any one
+  of those repos that next runs `git checkout .`, a reset, a rebase, or a `clean
+  -fd` throws away a correct, current, working install — and the vendored-copy guard
+  would not fire, because it checks the bytes it wrote, not the commit above them.
+- It is also invisible to the estate's own check. `installs verify --against-shipped`
+  reads disk and reports `2 behind` — it does not ask git, so it reports the healthy
+  lie: 68 repos whose working trees are one `git restore` away from a nine-release
+  regression, listed as fine.
+
+**What the guard is missing, in one sentence:** it verifies that a write landed, and
+nothing verifies that the write *stayed landed*. That is not the drift-check question
+from Q1 option 1; it is one rung below it, and it is measured here rather than argued.
+
+**What is NOT claimed, because it was not measured:** whether committing those 68 rows
+is safe or wanted (each repo has its own WIP, and holon's +1639 is a real
+modification, not noise), and whether any of them should instead be gitignored. That
+is 68 owners' decisions, not this seat's — the same shape as Q1, one rung larger.
+
+**Tooling, for the record:** `census.py` under `/var/tmp/ishanp-agentic/` runs the
+three-way question (disk / HEAD / registry claim) per registered row in about a
+second. The census this plan needs is reproducible now, which it was not before
+today. What it does NOT do is write anything: no tree was touched in producing it.
