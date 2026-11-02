@@ -1,0 +1,135 @@
+#Requires -Version 5.1
+# ─────────────────────────────────────────────────────────────────────────────
+# <NAME> installer (Windows) — generated from the install-script-creator template.
+# Fill every <PLACEHOLDER>, then DELETE every [SECTION:x] block that doesn't apply.
+#
+# One-liner (README):  irm https://raw.githubusercontent.com/<OWNER>/<REPO>/main/install.ps1 | iex
+# Run saved (if execution policy blocks): powershell -ExecutionPolicy Bypass -File install.ps1
+# Flags: -NoCta  -AllHarnesses  -SkipHarness     Env: SKIP_CTA=1 SKIP_HARNESS=1
+# ─────────────────────────────────────────────────────────────────────────────
+[CmdletBinding()]
+param(
+  [switch]$NoCta,
+  [switch]$AllHarnesses,
+  [switch]$SkipHarness
+)
+$ErrorActionPreference = 'Stop'
+if ($env:SKIP_CTA -eq '1') { $NoCta = $true }
+if ($env:SKIP_HARNESS -eq '1') { $SkipHarness = $true }
+
+$Name = '<name>'
+$Repo = '<owner>/<repo>'
+$BinDir = "$env:USERPROFILE\.$Name"        # or "$env:LOCALAPPDATA\$Name\bin"
+
+function Write-Info($m) { Write-Host "==> $m" -ForegroundColor Green }
+function Write-Warn($m) { Write-Host "warn: $m" -ForegroundColor Yellow -NoNewline; Write-Host '' }
+function Die($m) { Write-Host "error: $m" -ForegroundColor Red; exit 1 }
+function Generated($p) { Write-Host ">>> generated: $p <<<" }
+
+# ── [SECTION: arch] arch detection — reg truth, PROCESSOR_ARCHITECTURE lies ──
+$Arch = try {
+  (Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Environment').PROCESSOR_ARCHITECTURE
+} catch { $env:PROCESSOR_ARCHITECTURE }
+switch ($Arch) {
+  'AMD64'  { $Arch = 'x86_64' }
+  'ARM64'  { $Arch = 'arm64' }
+  default  { Die "Unsupported architecture: $Arch" }
+}
+
+# ── [SECTION: admin] no admin needed (user-scope install). If a system path is
+# truly required, prompt once and use Start-Process -Verb RunAs for just that step.
+
+# ── [SECTION: prereqs] winget → scoop → choco chain ─────────────────────────
+function Install-Pkg($pkg, $wingetId, $chocoId) {
+  if (Get-Command $pkg -ErrorAction SilentlyContinue) { return }
+  Write-Info "Installing prerequisite: $pkg"
+  if (Get-Command winget -ErrorAction SilentlyContinue) {
+    winget install --id $wingetId -e --accept-source-agreements --accept-package-agreements
+  } elseif (Get-Command scoop -ErrorAction SilentlyContinue) {
+    scoop install $pkg
+  } elseif (Get-Command choco -ErrorAction SilentlyContinue) {
+    choco install $chocoId -y
+  } else {
+    Die "$pkg missing and no package manager found (winget/scoop/choco). Install it, re-run."
+  }
+  if (-not (Get-Command $pkg -ErrorAction SilentlyContinue)) {
+    Die "$pkg still missing — open a NEW terminal (PATH refresh) and re-run"
+  }
+}
+
+# ── [SECTION: install-node] (node-cli profile) ──────────────────────────────
+# Install-Pkg node OpenJS.NodeJS nodejs
+# npm install -g "github:$Repo"      # or: npm install -g <npm-name>
+
+# ── [SECTION: install-python] (python-cli profile) ──────────────────────────
+# Install-Pkg python Python.Python.3.12 python
+# pipx preferred: pip install --user pipx; or uv: irm https://astral.sh/uv/install.ps1 | iex
+
+# ── [SECTION: install-binary] (rust-binary profile) ──────────────────────────
+# $asset = "$Name-$Version-$Arch-windows.zip"      # match real release asset names!
+# $url = "https://github.com/$Repo/releases/download/v$Version/$asset"
+# $tmp = New-TemporaryDirectory  # PS5: $tmp = Join-Path $env:TEMP (New-Guid)
+# Invoke-WebRequest -Uri $url -OutFile (Join-Path $tmp $asset)
+# $expected = '<sha256>'   # from the release's SHA256SUMS (second source)
+# $actual = (Get-FileHash (Join-Path $tmp $asset) -Algorithm SHA256).Hash.ToLower()
+# if ($actual -ne $expected.ToLower()) { Die "Checksum mismatch — report at github.com/$Repo/issues" }
+# Expand-Archive (Join-Path $tmp $asset) -DestinationPath $tmp
+# New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
+# Copy-Item (Join-Path $tmp "$Name.exe") $BinDir -Force
+
+# ── [SECTION: path] user PATH (idempotent) — keep if anything installs to PATH
+$cur = [Environment]::GetEnvironmentVariable('Path', 'User')
+if ($cur -notlike "*$BinDir*") {
+  [Environment]::SetEnvironmentVariable('Path', "$cur;$BinDir", 'User')
+  Generated 'user PATH'
+}
+$env:Path = "$env:Path;$BinDir"   # current session
+
+# ── [SECTION: config] first-run config seeding (only if the tool has config) ─
+# New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\.$Name" | Out-Null
+# $cfg = "$env:USERPROFILE\.$Name\config.toml"
+# if (-not (Test-Path $cfg)) {
+#   Set-Content $cfg "# $Name config — docs: github.com/$Repo#configuration"
+#   Generated $cfg
+# }
+
+# ── [SECTION: harness] AI-agent harness integration (see references/mcp-wiring.md)
+if (-not $SkipHarness) {
+  $found = @('claude','codex','opencode','gemini','qwen','grok','goose','zeroclaw','pi','droid') |
+    Where-Object { Get-Command $_ -ErrorAction SilentlyContinue }
+  if ($found) {
+    if ($AllHarnesses -or (-not [Environment]::UserInteractive -and $false)) {
+      $answer = 'y'
+    } else {
+      $answer = Read-Host "Configure $($found -join ', ') ? [Y/n]"
+    }
+    if ($answer -notmatch '^n') {
+      Write-Info 'Harness integration: see references/harness-matrix.md + mcp-wiring.md'
+      # npx skills add "$Repo" --agent '*' --skill '*' -y   (skills projects)
+      # per-harness MCP registration snippets (absolute paths)
+    }
+  }
+}
+
+# ── [SECTION: verify] post-install verification — keep always ───────────────
+if (-not (Get-Command $Name -ErrorAction SilentlyContinue)) {
+  Die "$Name not on PATH — open a NEW terminal, or rerun after: `$env:Path += `";$BinDir`""
+}
+Write-Info "Verified: $(& $Name --version 2>$null)"
+
+# ── [SECTION: cta] star + donate — NEVER delete ──────────────────────────────
+if (-not $NoCta) {
+  Write-Host ''
+  Write-Host '──────────────────────────────────────────────────────'
+  Write-Host " ⭐  Found $Name useful? Star it:  https://github.com/$Repo"
+  Write-Host ' 💜  Support development:'
+  Write-Host '     GitHub Sponsors : https://github.com/sponsors/<sponsors-handle>'
+  Write-Host '     Razorpay (UPI)  : https://rzp.io/rzp/<handle>'    # ← delete if N/A
+  Write-Host "     Or run '$Name donate' anytime."                    # ← keep if CLI has it
+  Write-Host '──────────────────────────────────────────────────────'
+}
+
+Write-Host ''
+Write-Info "Done. Next steps:"
+Write-Host "  1. $Name --help (open a NEW terminal first)"
+# Write-Host "  2. $Name config set ..."   ← project-specific first-run steps

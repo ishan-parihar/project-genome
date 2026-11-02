@@ -1,0 +1,15 @@
+@echo off
+rem ── <NAME> installer (CMD wrapper) ────────────────────────────────────────
+rem Thin wrapper: fetches install.ps1 and runs it with a permissive execution
+rem policy for THIS process only. PowerShell is the real installer.
+rem README one-liner (cmd):
+rem   curl -fsSL https://raw.githubusercontent.com/<OWNER>/<REPO>/main/install.ps1 -o "%TEMP%\install.ps1" && powershell -ExecutionPolicy Bypass -File "%TEMP%\install.ps1"
+setlocal
+set "PS_URL=https://raw.githubusercontent.com/<OWNER>/<REPO>/main/install.ps1"
+set "PS_FILE=%TEMP%\<name>-install.ps1"
+where curl >nul 2>&1 || (echo error: curl not found — Windows 10 1803+ ships it & exit /b 1)
+curl -fsSL "%PS_URL%" -o "%PS_FILE%" || (echo error: download failed: %PS_URL% & exit /b 1)
+powershell -NoProfile -ExecutionPolicy Bypass -File "%PS_FILE%" %*
+set "EC=%ERRORLEVEL%"
+del "%PS_FILE%" >nul 2>&1
+endlocal & exit /b %EC%

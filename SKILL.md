@@ -1,6 +1,6 @@
 ---
 name: project-genome
-description: "Sets up, adopts and runs a project's knowledge genome: documentation roles with mutability classes plus a stdlib `genome` CLI whose modules scale from a small app to a multi-year R&D program — decision/regression records (recon-gated, amendable, merged with an ID map), research evidence (evidence classes, quarantined figures, hypotheses with verdicts, frozen pre-registrations), housekeeping gates (ownership map, dead links, unreachable code, tracked bulk, secrets, budgets) and parallel-agent claims. Gives one-call orientation (`wake`), section-level retrieval (`ask`) and iteration close (`close`) for token-efficient agents. Use whenever the user sets up or rescues project docs, a KB, handoff/state docs, worklogs, ADRs or regression records, a research or experiment log, a custom knowledge base with its own lifecycle (a subjective mind map, a multi-person relational map, a literature review from papers toward novel hypotheses, an ontology built by derivation, or any schema of your own: blueprints), invalidated numbers, operator rulings that must reach the docs, record consolidation, housekeeping, resuming after compaction, parallel agents, or migrates off kb/kb.toml or an external arch record CLI."
+description: "Sets up, adopts and runs a project's knowledge genome: documentation roles with mutability classes plus a stdlib `genome` CLI whose modules scale from a small app to a multi-year R&D program — decision/regression records (recon-gated, amendable, merged with an ID map), research evidence (evidence classes, quarantined figures, hypotheses with verdicts, frozen pre-registrations), housekeeping gates (ownership map, dead links, unreachable code, tracked bulk, secrets, budgets) and parallel-agent claims. Gives one-call orientation (`wake`), section-level retrieval (`ask`) and iteration close (`close`) for token-efficient agents. OWNS THE OUTWARD SURFACE TOO: README and docs generation and validation (default code docs, gold-standard README, OSS doc pack, docs-site split, de-slop pass), the cross-platform installer suite (install.sh/install.ps1, harness and MCP wiring, star/donate epilogue, embedded updater, docker smoke tests), and the repo surface GitHub needs to publish at all (About, topics, sponsorship, licence). Use whenever the user sets up or rescues project docs, a KB, handoff/state docs, worklogs, ADRs or regression records, a research or experiment log, a custom knowledge base with its own lifecycle (a subjective mind map, a multi-person relational map, a literature review from papers toward novel hypotheses, an ontology built by derivation, or any schema of your own: blueprints), invalidated numbers, operator rulings that must reach the docs, record consolidation, housekeeping, resuming after compaction, parallel agents, migrates off kb/kb.toml or an external arch record CLI, or asks to write/rewrite/audit a README or docs, add a docs site, split a README, make a project installable with a one-line installer, add an install script, wire MCP or skills into agent harnesses, or fix repo descriptions, topics, sponsorship or licences."
 ---
 
 # project-genome
@@ -60,6 +60,30 @@ and what a retraction invalidates, on write rather than in prose.
 | `intersubjective` | several people's maps: attachment, transactional analysis, patterns; what crosses between maps (`--across of`) |
 | `literature-research` | papers → verbatim claims → graded findings → testable hypotheses; Swanson gaps; retractions cascade |
 | `ontology` | axioms → derivations → theses on a human-gated ladder; witnesses corroborate, never ground |
+
+## The outward surface: docs, installers, repo metadata
+
+The genome is the inside of the project. Three things sit between it and a
+stranger, and this skill owns all three, because they are the same discipline
+(one owner per question, claims traceable, nothing published that cannot be
+re-derived) pointed at a reader:
+
+| Surface | What you are asked for | Read |
+|---|---|---|
+| **Docs** — `README.md` + `docs/` | "write/rewrite the README", "audit my docs", "scaffold contributing", "split my docs", "which docs framework" | `references/docs.md` |
+| **Installer** — `install.sh`, `install.ps1`, harness wiring | "make it installable", "one-line install", "setup/bootstrap script", "wire this MCP server into my harnesses" | `references/installer.md` |
+| **Repo surface** — About, topics, `FUNDING.yml`, `LICENSE` | "fix my repo descriptions/topics", "add sponsorship", or any new repo | `references/surface.md` |
+
+All three were standalone skills (`doc`, `install-script-creator`) and are now
+references here: same workflows, same validation scripts, one entry point. The
+depth is unchanged and lives under `references/docs/`, `references/installer/`,
+`scripts/docs/` and `assets/installer/`.
+
+The boundary between docs and the genome is `references/docs/project-genome-seam.md`:
+state, worklog, records and evidence are genome roles; the README and `docs/`
+are outward. `lint`'s W008/W009 fire when the two disagree. A README is still
+the `readme` role even in a repo too small for a genome — that is the floor,
+not an exemption.
 
 Custom: `genome blueprint new <name> [--from base]`, edit, then `genome blueprint check <file>`, which drives the real CLI
 through every kind, relation, state and taint edge and fails with the first step that broke. `blueprint list|show`
@@ -182,3 +206,6 @@ Copying the CLI in keeps the genome self-sustaining: a future agent needs no ext
 | `references/agents.md` | the parallel-agent protocol: identity, claims, feed, boards |
 | `references/adoption.md` | adopting a repo, kb.toml migration, detaching from `arch`, worked `genome.toml` examples |
 | `references/lint-rules.md` | every E### / W### code, what it means, the fix |
+| `references/docs.md` | README / docs work: the four modes, the trust rules, validation, and the router into `references/docs/` |
+| `references/installer.md` | install scripts: the six steps, the non-negotiable rules, and the router into `references/installer/` and `assets/installer/` |
+| `references/surface.md` | About / topics / sponsorship / licence: the four fields, the writers that measure them, and the traps |
