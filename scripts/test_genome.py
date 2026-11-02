@@ -2062,6 +2062,69 @@ def p5_offer_class(root: Path) -> None:
     assert r.startswith(str(meta / "docs/LEDGER.md")), r
 
 
+@case
+def p7_uncommitted_copy_is_reported_not_swallowed(root: Path) -> None:
+    """P7: a vendored copy can hold the shipped bytes on disk AND be one `git restore`
+    from a regression. Measured 2026-11-02 on the host: 74 of 85 registered rows read
+    the shipped bytes with ` M scripts/genome` in `git status`, and
+    `installs verify --against-shipped` — which reads the disk and never asks git —
+    reported all of them healthy. A guard that checks a write landed and nothing that
+    checks it stayed landed certifies a regression-in-waiting as clean, so the check
+    gains the fourth question and this case pins both halves of it.
+
+    It also pins the symlink half, because the first implementation got it wrong:
+    holon/scripts/genome is a symlink to holon/vendor/genome.py, `git status` on the
+    LINK is clean while the TARGET is modified, and asking about the link reported the
+    uncommitted copy as clean. One fixture covers both shapes."""
+    # a repo with a vendored copy, committed and clean
+    env = dict(os.environ, GENOME_INSTALLS=str(root / "installs.json"))
+    repo = root / "owned"
+    repo.mkdir()
+    new_repo(repo)
+    (repo / "scripts").mkdir()
+    (repo / "scripts" / "genome").write_text(Path(G).read_text())
+    git(repo, "add", "-A")
+    git(repo, "commit", "-qm", "pin the vendored CLI")
+    run(repo, "installs", "register", "vendored", str(repo), "--note", "a clean vendored copy", env=env)
+
+    # and one whose copy is current on disk but NOT committed — the estate's real state,
+    # reached through a symlink so the second blind spot is covered by the same fixture
+    dirty = root / "dirty"
+    dirty.mkdir()
+    new_repo(dirty)
+    (dirty / "scripts").mkdir()
+    (dirty / "vendor").mkdir()
+    (dirty / "vendor" / "genome.py").write_text(Path(G).read_text() + "\n# a local edit\n")
+    (dirty / "scripts" / "genome").symlink_to(dirty / "vendor" / "genome.py")
+    git(dirty, "add", "-A")
+    git(dirty, "commit", "-qm", "pin the vendored CLI and its symlink")
+    # the uncommitted shape: the TARGET changes, the link does not
+    (dirty / "vendor" / "genome.py").write_text(Path(G).read_text() + "\n# the upgrade write\n")
+    run(dirty, "installs", "register", "vendored", str(dirty), "--note", "an uncommitted vendored copy", env=env)
+
+    # verify needs a skill/bin row to name the shipped reference: the publisher's checkout
+    # is what `install.sh` manages, and both test copies are versioned against it
+    env = dict(os.environ, GENOME_INSTALLS=str(root / "installs.json"))
+    (root / "skill").mkdir()
+    (root / "skill" / "scripts").mkdir(parents=True)
+    (root / "skill" / "scripts" / "genome").write_text(Path(G).read_text())
+    run(root, "installs", "register", "skill", str(root / "skill"), env=env)
+    v = run(repo, "installs", "verify", "--against-shipped", ok=False, env=env)
+    # a report line ends with the prose, not the path, so take the word right after the
+    # kind tag instead of the last field
+    named = [l.split("—")[0].split()[-1] for l in v.stdout.splitlines() if l.startswith("UNCOMMITTED")]
+    assert str(dirty) in named, f"an uncommitted vendored copy must be reported: {v.stdout}"
+    assert not any(str(repo) in n for n in named), (
+        f"a committed-and-clean copy must not be reported: {v.stdout}")
+    # and the symlink blind spot, which is what the first implementation missed: git is
+    # asked about the RESOLVED path, so the report names the target, not the clean link
+    assert "vendor/genome.py" in v.stdout, (
+        f"the report must name the resolved target, not the symlink: {v.stdout}")
+    # the exit code is not gated on this: a repo that intentionally gitignores its
+    # generated copy is healthy, so the report prints and the owner decides
+    assert v.returncode in (0, 2), v.returncode
+
+
 def main() -> None:
     names = sys.argv[1:] or list(CASES)
     unknown = [n for n in names if n not in CASES]

@@ -20,6 +20,7 @@ Everything below is stdlib-only unless it says otherwise.
 | the CLI, this repo's own version | `python3 scripts/genome --version` | prints the `src/01_constants.py` VERSION stamp, not the distribution version |
 | mint a new lint code | (no command — a rule) | the next free flat code. Measured 2026-11-02: live max **E018**, free **E019/E020/E021**, gaps **E007/E011/E012 are NOT reused**. The `grep` counts 46 E / 21 W including runtime-assembled and doc-only codes; the 15/10 flat count is what `src/` literally names, and it is the one rule 8 states |
 | the eval suite | `python3 evals/grade.py <id> <repo>` | 16 evals in `evals/evals.json`; `python3 evals/make_fixtures.py` builds the fixtures first |
+| the estate census | `genome installs verify --against-shipped` | every registered row against the shipped bytes, and separately against git. Measured 2026-11-02 on the host: **74 of 85 rows UNCOMMITTED** — the shipped bytes on disk, an older `scripts/genome` at HEAD, ` M` in `git status`. A row can be CURRENT on disk and still be one `git restore` from a regression, so verify reports BEHIND / UNKNOWN / CORRUPTED / **UNCOMMITTED**. Only the first three gate the exit code: a repo that intentionally gitignores its generated copy is healthy, so UNCOMMITTED is a report the owner resolves, not a failure. Resolves symlinks (`holon/scripts/genome` is a link to `holon/vendor/genome.py`, and asking git about the link reports a clean file while the target is modified) |
 | release | `docs/PUBLISHING.md` | the operator's credential, the operator's step. Nothing in this repo publishes by itself |
 
 ## Environment traps
@@ -29,7 +30,15 @@ Everything below is stdlib-only unless it says otherwise.
   dependency-free.
 - **Never hand-edit `scripts/genome`, `dist/`, or a generated zone.** They are built.
   Running the build is the edit.
-  The SYMPTOM to recognise: the edit is gone and nothing says so. `git status` is clean,
+- **`uv` is a binary here, not a python module.** `uv build` works; `python3 -m uv build`
+  exits 1 with *no module named uv* (measured 2026-11-02). The `[core] gate` string uses the
+  bare form.
+- **`build.py` refuses a second build of the same VERSION.** A released version's checksum is
+  the promise the fleet's `upgrade` compares against, so an edit inside one release cannot be
+  rebuilt — bump `VERSION` in `src/01_constants.py` first. Measured: two builds inside
+  `2026.11.02-41` and `-42` before the code stopped moving.
+- **A `scripts/genome` edit vanishes silently at the next build.** The SYMPTOM to
+  recognise: the edit is gone and nothing says so. `git status` is clean,
   `git diff` is empty, the checksum guard never fires (it only refuses a same-VERSION build
   that CHANGES bytes, and the rebuild reproduces the bytes `src/` describes), and
   `build.py --check` passes because the artifact really was rebuilt. An edit applied to

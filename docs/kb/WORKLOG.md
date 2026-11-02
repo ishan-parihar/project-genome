@@ -649,3 +649,57 @@ is 68 owners' decisions, not this seat's — the same shape as Q1, one rung larg
 three-way question (disk / HEAD / registry claim) per registered row in about a
 second. The census this plan needs is reproducible now, which it was not before
 today. What it does NOT do is write anything: no tree was touched in producing it.
+
+## 2026-11-02 (the missing rung, shipped) — verify gains the question it never asked
+
+The census measured the problem: 68 rows hold the shipped bytes on disk, an older
+`scripts/genome` at HEAD, and ` M` in `git status`, while `installs verify
+--against-shipped` — which reads the disk and never asks git — reported all of them
+healthy. **A guard that checks a write landed, and nothing that checks it stayed
+landed, certifies a regression-in-waiting as clean.** So the guard gets the rung, and
+it is `2026.11.02-43`.
+
+**Shipped:** `_uncommitted_cli(repo)` in `src/16b_installs.py`, called for every
+`vendored` and `bin` row by `_verify_against_shipped`. It asks `git status --short
+-- <resolved path>` and prints
+`UNCOMMITTED <kind> <path> — scripts/genome is modified in the working tree (M
+scripts/genome); git can discard it on the next restore/checkout`, plus a one-line note
+naming the count. **Measured on the live estate: 74 rows reported** (68 the census
+found, plus this kernel and the skill roots, whose own `-40` writes were also
+uncommitted). Two repos correctly report nothing: `operant` and `pioneer-qf`, whose
+copies are committed.
+
+**It does not gate the exit code, deliberately.** BEHIND / UNKNOWN / CORRUPTED answer
+"what are the bytes"; UNCOMMITTED answers "what will git let them stay", and only the
+owner knows whether a vendored copy is tracked or generated. A repo that intentionally
+gitignores its copy is healthy, so a red exit on this would punish exactly the right
+answer. Measured: exit stays 2 for the estate's three BEHIND rows and 0 when those are
+cleared, with 74 UNCOMMITTED rows printed either way.
+
+**Two things the first implementation got wrong, both caught by running it:**
+
+1. **An empty pathspec is a git error, not an empty result.** The first
+   `git status --short -- "" scripts/genome` exited 128 (`fatal: empty string is not a
+   valid pathspec`) and returned nothing, which the code read as "clean". Every repo
+   reported clean. Now the call asserts its own success before believing its silence,
+   which is the same discipline `test_genome` applies elsewhere.
+2. **A symlinked copy is a second blind spot, and it is the one holon lives in.**
+   `holon/scripts/genome` is a symlink to `holon/vendor/genome.py`. `git status` on the
+   LINK reports the link — clean — while the TARGET is the modified file
+   (` M holon/vendor/genome.py`). Asking about the link reported holon's uncommitted
+   copy as clean. The fix resolves the path before asking, so the row now names
+   `vendor/genome.py` — the file git will actually discard.
+
+**Also measured, and both cost a build:** `python3 -m uv` does not exist here (only the
+binary), and `build.py` **refuses a second build of the same VERSION** — a released
+version's checksum is the promise the fleet compares against, so `2026.11.02-41` and
+`-42` were both burned before the code stopped moving. Both are now traps in
+`docs/RUNBOOK.md`.
+
+`test_genome` gains `p7_uncommitted_copy_is_reported_not_swallowed`, which pins all of
+it: a committed vendored copy is not reported, an uncommitted one is, the symlink's
+target is named rather than the clean link, and the exit code is not gated. 40/40.
+
+**Still not decided, and still not this seat's:** whether any of the 68 (now 74)
+uncommitted rows should be committed or gitignored. That is the ruling the operator
+owes, and the check above is what makes the question askable.
