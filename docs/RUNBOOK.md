@@ -8,17 +8,17 @@ Everything below is stdlib-only unless it says otherwise.
 |---|---|---|
 | build the CLI from source | `python3 scripts/build.py` | writes `scripts/genome` AND records its sha in `scripts/releases.txt`; it **refuses** to rewrite a released checksum — bump `VERSION` in `src/01_constants.py` first |
 | check the artifact is current | `python3 scripts/build.py --check` | exits 1 when `scripts/genome` differs from the build. Run it before any commit that touched `src/` |
-| the CLI suite | `python3 scripts/test_genome.py` | 38/38 measured 2026-10-30. Runs against a **scratch copy**; it never writes your project |
+| the CLI suite | `python3 scripts/test_genome.py` | 39/39 measured 2026-11-02. Runs against a **scratch copy**; it never writes your project |
 | the packaging suite | `python3 scripts/test_package.py` | needs `dist/` to hold the built artifacts; 8/8. Installs the wheel in a throwaway venv and asserts byte parity with `scripts/genome` |
-| the packaging-modes suite | `python3 scripts/test_package_modes.py` | 5/5 measured 2026-10-30. Covers the sdist path, the whole command surface in installed mode, the exit codes a CI job chains on, and the Python floor. **Run it from a neutral cwd** (`cwd=/`) — from the repo root the local `project_genome/` shadows site-packages |
+| the packaging-modes suite | `python3 scripts/test_package_modes.py` | 5/5 measured 2026-11-02. Covers the sdist path, the whole command surface in installed mode, the exit codes a CI job chains on, and the Python floor. It now **refuses a stale `dist/` by name** ("stale dist/: … `uv build` first") rather than comparing two stale hashes — the 2026-11-01 failure (`a9263e5bbe53 vs 11bf845430e0`) was an artefact age, not a cwd |
 | installer parity | `python3 scripts/check_ps1.py` | structure + cross-installer parity for `install.ps1`; 412 lines measured 2026-10-30 after the canonical-root skill rework |
 | outline-language probe | `python3 scripts/probe-outline-languages.py` | 9/9 measured 2026-10-30 |
-| build both artifacts | `uv build` | produces the sdist and the wheel in `dist/`; the packaging suites install those, not the source tree |
+| build both artifacts | `uv build` | produces the sdist and the wheel in `dist/`; the packaging suites install those, not the source tree. It is now the **first** step of `[core] gate`, so the gate can never measure an artifact it did not refresh. Note it writes the two names it knows and leaves any stray file in `dist/` alone |
 | lint this repo | `python3 scripts/genome lint --all` | plain `lint` truncates; `--all` prints every finding |
 | doctor | `python3 scripts/genome doctor` | staleness and append-only violations |
 | the CLI, from this repo | `python3 scripts/genome wake` | also `python3 -m project_genome` from an installed copy |
 | the CLI, this repo's own version | `python3 scripts/genome --version` | prints the `src/01_constants.py` VERSION stamp, not the distribution version |
-| mint a new lint code | (no command — a rule) | the next free flat code. Measured 2026-10-30: live max **E017**, free **E018/E019/E020**, gaps **E007/E011/E012 are NOT reused** |
+| mint a new lint code | (no command — a rule) | the next free flat code. Measured 2026-11-02: live max **E018**, free **E019/E020/E021**, gaps **E007/E011/E012 are NOT reused**. The `grep` counts 46 E / 21 W including runtime-assembled and doc-only codes; the 15/10 flat count is what `src/` literally names, and it is the one rule 8 states |
 | the eval suite | `python3 evals/grade.py <id> <repo>` | 16 evals in `evals/evals.json`; `python3 evals/make_fixtures.py` builds the fixtures first |
 | release | `docs/PUBLISHING.md` | the operator's credential, the operator's step. Nothing in this repo publishes by itself |
 

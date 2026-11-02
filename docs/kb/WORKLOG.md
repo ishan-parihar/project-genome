@@ -395,3 +395,58 @@ describing.**
 Also found and recorded: **E018 shipped with no row in `references/lint-rules.md`** (the table
 has 14 flat E rows, none for E018) — a shipped code a reader cannot look up.
 - **2026-11-01T02:31** — the census table's `holon` row names the mechanism as "rewritten 07:40 local with no commit above a 22:56-UTC HEAD", and that is as far as the evidence goes: the file's mtime is 07:40 local and the last commit above it is from 22:56 UTC the previous day. What *wrote* it — a checkout, a reset, a pull, an editor restoring a stale buffer — is not distinguishable from the reflog alone, and the outline says so rather than guessing.
+
+## 2026-11-02 — the gate measured an artifact it never refreshed, and PQ-4 died
+
+The 2026-11-01 outline put the stale-`dist/` trap in Tier 2 with a fix already
+chosen: `[core] gate` had to *build* before it measured, and a stale `dist/` had
+to fail by name rather than as two hashes a reader cannot explain. Executed today,
+after reproducing the failure rather than reasoning about it.
+
+**Reproduced in both directions.** A forged wheel whose `_genome.py` is
+`scripts/genome` plus 26 bytes, written under a name that sorts last (so
+`wheels[-1]` picks it), reproduced the exact live signature:
+`11bf845430e0 vs 192d048029e9`. `dist/` was backed up outside the repo first and
+restored byte-identical after, so the reproduction cost nothing. Then the same
+script with the artefact *aged* (`touch -d 2026-10-01`) reproduced the age the
+gate is really about.
+
+**Two things the plan did not know, both measured:**
+
+1. **`python3 -m uv` does not exist here.** The plan's fix was spelled
+   `python3 -m uv build`. On this machine `uv` is only a binary at
+   `/usr/bin/uv` (`uv 0.13.4`); `python3 -m uv` exits 1 with *no module named uv*.
+   Had that been committed as written, the gate would have failed at its first
+   step on every run. The gate string is bare `uv build --wheel --sdist`, matching
+   `docs/RUNBOOK.md`'s existing row.
+2. **`uv build` does not clear `dist/`.** It rewrites the two names it knows and
+   leaves any stray file alone — a `zz_junk.whl` survived a full build. So the
+   guard cannot just check the two artefacts it expects; it ages the whole glob.
+
+**Tier 2 landing:**
+
+- `[core] gate` now starts with `uv build --wheel --sdist`, so the gate can never
+  measure an artifact it did not refresh. The build step is silent
+  (`>/dev/null`) to keep `genome close`'s output readable.
+- `test_package_modes.py` gained `fresh_dist_or_die()`, called from `main()`
+  before any case runs. Aged or absent artefacts exit with **"stale dist/: …
+  `uv build` first"** instead of a pairwise hash comparison. Measured both
+  directions: aged → exit 1 with the refusal; fresh → 5/5.
+- **PQ-4 is closed as a non-issue.** With a fresh `dist/` the suite passes from
+  `cwd=/` (exit 0, 5/5). The repo-root-shadowing claim was never reproduced once
+  the artefact age was removed, so the honest sentence is two conditions, both
+  measured: a fresh `dist/` *and*, for cited evidence, a neutral cwd.
+- **E018 now has its row** in `references/lint-rules.md`, with the reason a
+  reader needs — that an *undeclared* `schema_version` is deliberately not this
+  error. `AGENTS.md` rule 8's catalogue was three days stale (it said max E017,
+  free E018/E019/E020, "14 E-codes"); re-measured against `src/`, it is **15 E
+  and 10 W** flat, free **E019/E020/E021**, and the row now says why the `grep`
+  count of 46/21 is not the catalogue. `docs/RUNBOOK.md` carried the same three
+  stale figures plus a "38/38" test count, also re-measured to 39/39.
+- `PQ-2` in the register still listed `E018` as an unfired gate. Corrected: E018
+  shipped 2026-11-01, the frontier is E019/E020/E021 plus the first M-code, and
+  no M-code exists in the source yet.
+
+Full gate green as the new string: `uv build` → `test_genome` 39/39 →
+`test_package` 8/8 → `test_package_modes` 5/5 → `build --check` → `check_ps1`.
+Exit 0, and the build now precedes the measuring by construction.

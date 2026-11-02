@@ -22,6 +22,7 @@ Errors are doctrine violations. Warnings are hygiene, or judgement the linter ca
 | E015 | the numbered worklog's index zone is stale or absent | `genome emit` (close does it) |
 | E017 | `genome.toml` has a key or section genome does not read (a typo switches a check off silently) | fix the spelling; `references/*.md` list every key |
 | E016 | an entry surface exceeds its byte budget | move history out (worklog/archive) or replace prose with a pointer |
+| E018 | `schema_version` is declared and lower than this CLI's: the repo is unmigrated, so every membership glob reads with the old dialect | `genome migrate` — and note an *undeclared* version is not this error, because nothing was migrated *away* from anything |
 | W000 | no agent contract | write AGENTS.md: identity, gate, routing table |
 | W006 | two dated plans with overlapping titles | keep one owner, archive the other |
 | W007 | archive file missing from its INDEX / generation manifest, or a generation without a manifest | add the manifest row (`genome archive` writes it) |

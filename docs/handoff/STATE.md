@@ -3,6 +3,43 @@
 Current snapshot only (no history: that is the worklog). The first `## ` block is
 what `genome wake` shows.
 
+## State — 2026-11-02, after the stale-`dist/` trap closed in the gate (`2026.10.31-40`)
+
+- **The gate now builds before it measures, so it cannot report the build system's state as the
+  code's.** `[core] gate` starts with `uv build --wheel --sdist`, and
+  `test_package_modes.py` refuses a stale `dist/` by name
+  (`stale dist/: … uv build first`) instead of comparing two stale hashes. Measured
+  both directions: aged artefacts → exit 1 with the refusal; fresh → 5/5. This
+  closes **PQ-5 in code** and **PQ-4 as a non-issue** — with a fresh `dist/` the
+  suite passes from `cwd=/` (exit 0, 5/5), so the repo-root-shadowing claim was
+  never the cause. Full gate green as the new string: `uv build` → `test_genome`
+  39/39 → `test_package` 8/8 → `test_package_modes` 5/5 → `build --check` →
+  `check_ps1`.
+- **Two facts measured here that the plan did not know.** `python3 -m uv` does not
+  exist on this machine — `uv` is only `/usr/bin/uv` (`0.13.4`) — so the plan's
+  fix, spelled `python3 -m uv build`, would have failed the gate at its first
+  step on every run; the string is bare `uv build`. And `uv build` **does not
+  clear `dist/`**: it rewrites the two names it knows and leaves a stray file
+  alone (a `zz_junk.whl` survived a full build), so the guard ages the whole glob.
+- **E018 shipped with no documentation row; it has one now, and the catalogue is
+  current.** `references/lint-rules.md` carries the E018 row with the distinction
+  a reader needs (an *undeclared* `schema_version` is deliberately not this
+  error). `AGENTS.md` rule 8's catalogue was three days stale — said max E017,
+  free E018/E019/E020, "14 E-codes"; re-measured against `src/` it is **15 E and
+  10 W** flat, free **E019/E020/E021**, and the row now explains why the `grep`
+  count of 46/21 is not the catalogue. The same three stale figures plus a
+  "38/38" sat in `docs/RUNBOOK.md`; re-measured to 39/39.
+- **Register corrected: `PQ-2`'s gate list named `E018` as unfired.** E018 shipped
+  2026-11-01, so the frontier is `M017` plus `E019/E020/E021`, and no M-code
+  exists in the source yet (measured 2026-11-02).
+- **Still the largest gap, and still the operator's: 75/76 vendored copies sit at
+  `2026.10.31-40`, and `pioneer-qf` and `holon` sit at `2026.10.27-13` again.**
+  Both were reverted after the swaps landed, by external git operations. **Q1 in
+  `docs/kb/ASKS.md` is still open** — the vendored-copy convention is Tier 0 of
+  the 2026-11-01 outline, and until it is ruled, every dispatch into this fleet
+  can be silently undone by a `git checkout`. Neither copy has been re-applied to:
+  overwriting an owner's checkout is what the vendored-copy guard exists to prevent.
+
 ## State — 2026-11-01, after the remaining gaps were re-measured (`2026.10.31-40`)
 
 - **The fleet is current in bytes and two copies are not, and both were reverted from

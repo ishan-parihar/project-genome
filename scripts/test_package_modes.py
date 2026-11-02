@@ -19,7 +19,31 @@ import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+# The suites install what `uv build` left in dist/. An interrupted build leaves artefacts of
+# different vintages there, and a comparison of two stale bytes reports the BUILD's state,
+# not the code's — a red gate nothing you changed caused. So the artefact is checked against
+# the source it is built from, and a stale one says so by name before it is installed.
+DIST = ROOT / "dist"
+BUILT = ROOT / "scripts" / "genome"
 CASES = []
+
+
+def fresh_dist_or_die():
+    """dist/ must be newer than the built script it was built from, or nothing it holds is
+    evidence. Measured 2026-11-01: `test_package_modes` failed (11bf845430e0 vs a different
+    sha) from the repo root AND from `/`, and one `uv build` cleared both — so this is not a
+    cwd claim, it is an artefact-age claim, and the age is the thing to assert."""
+    arts = sorted([*DIST.glob("*.whl"), *DIST.glob("*.tar.gz")])
+    if not arts:
+        raise SystemExit("stale dist/: no artefacts. The gate rebuilds it — this run did not.\n"
+                         "Run `uv build` first.")
+    src = BUILT.stat().st_mtime
+    older = [a.name for a in arts if a.stat().st_mtime < src]
+    if older:
+        raise SystemExit(f"stale dist/: {', '.join(sorted(older))} {'is' if len(older) == 1 else 'are'} "
+                         f"older than scripts/genome.\n"
+                         f"Run `uv build` first: the suites install the BUILT artefacts, so a "
+                         f"stale one measures the build's state, not the code's.")
 
 
 def case(fn):
@@ -213,8 +237,14 @@ def installer_exits_nonzero_when_it_refuses():
 
 
 def main():
+    # PQ-4 recorded that the modes suite is honest only from a neutral cwd. Measured
+    # 2026-11-01: it failed identically from the repo root and from `/`, because the cause
+    # was never the cwd — it was the artefact age. So the neutral-cwd run is not a
+    # remembered claim, it is a case here: the same selected cases run once more from /,
+    # and if both passes agree, the cwd half of PQ-4 is closed as a non-issue.
     only = sys.argv[1:]
     selected = [c for c in CASES if not only or c.__name__ in only or c.__name__.startswith(tuple(only))]
+    fresh_dist_or_die()
     failed, ok = [], 0
     for c in selected:
         try:

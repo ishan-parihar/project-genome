@@ -22,7 +22,7 @@ regressions = "docs/regressions"
 records_index = "docs/RECORDS.md"
 
 [core]
-gate = "python3 scripts/test_genome.py && python3 scripts/test_package.py && python3 scripts/test_package_modes.py && python3 scripts/build.py --check && python3 scripts/check_ps1.py"
+gate = "uv build --wheel --sdist >/dev/null && python3 scripts/test_genome.py && python3 scripts/test_package.py && python3 scripts/test_package_modes.py && python3 scripts/build.py --check && python3 scripts/check_ps1.py"
 # The gate `genome close` runs. Suite-only on purpose: it must pass in a few minutes and need
 # nothing but the stdlib, so it runs before every push. The full verification adds
 # `python3 scripts/genome lint`, `python3 scripts/genome doctor`, and for a release

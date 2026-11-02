@@ -130,13 +130,13 @@ both installers after a reset discarded a working-tree copy in operant).
 7. **The CLI stays one stdlib-only file.** No imports, no dependencies. A change that
    breaks copy-one-file installability breaks the property the whole design rests on.
 8. **A new lint code takes the next free flat number, never a gap.** The live
-   catalogue, derived from the shipped script on 2026-10-30 (`grep -rhoE` over `src/`):
-   **14 E-codes and 10 W-codes** — E001-E006, E008-E010, E013-E017 (max **E017**; free
-   **E018/E019/E020**) and W000, W006-W014. The gaps — **E007, E011, E012** and
+   catalogue, derived from the shipped script on 2026-11-02 (`grep -rhoE` over `src/`):
+   **15 E-codes and 10 W-codes** — E001-E006, E008-E010, E013-E018 (max **E018**; free
+   **E019/E020/E021**) and W000, W006-W014. The gaps — **E007, E011, E012** and
    **W001-W005** — are deliberately not reused, because older fleet copies may carry them
    with meanings a new code cannot derive. (The 2026-10-28 audit's "44 E-codes and 21
    W-codes" counts every code the module can emit, including ones assembled at runtime and
-   doc tables alone; the 14/10 here is what the source literally names.) This is the rule
+   doc tables alone; the 15/10 here is what the source literally names.) This is the rule
    the KB-protocol addendum was written to enforce
    (`docs/plans/2026-10-28-KB-GATE-NUMBERING-ADDENDUM.md`).
 9. **Worklog entries are committed.** A logged-but-uncommitted entry is invisible to
