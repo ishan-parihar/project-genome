@@ -733,3 +733,4 @@ tracked-and-ignored path for the same reason.
 
 VERSION 2026.11.02-48. The fleet's 89 vendored copies are now one release behind; `genome installs`
 regenerate updates them after the next push.
+- **2026-11-03T09:28** — Fleet upgrade: doc + install-script-creator + workspace-lint consolidated into the integrity module, three severities, and -43 fleet at -60

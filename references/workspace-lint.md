@@ -111,3 +111,34 @@ no equivalent, deliberately: every housekeeping gate here **fails closed and
 tells you the command** (E306 names `move or rename the file`) rather than
 mutating the tree. An agent that silently relocates files breaks paths other
 agents mid-run are holding. The fix is a suggestion the operator applies.
+
+## What the fleet run changed about the module
+
+Enabling the module on three real repos measured the part the unit tests could not: the
+**phase budget**. Holon is a Python distribution whose `test` tier is 48 modules (six past
+120s, discovery over ten minutes, `tests/test_adapters.py` holding a real
+`time.sleep(120)`) and whose `lint` phase is its own `holon lint --strict`, which runs
+past 300s. Declaring either produced `E651 ... timed out after 300 seconds` on a repo
+that was not broken.
+
+Two conclusions, both now written into the repo's own `genome.toml` where the next person
+will look:
+
+1. **A phase that cannot finish must not be declared.** A check that reports an error for
+   a suite that is merely slow teaches the reader to ignore the error. Holon declares
+   `build` (a compile check, seconds) and leaves `test`/`lint` to CI, and the `I651` info
+   line names what was checked so silence is not mistaken for a green suite.
+2. **A phase that calls the linter which calls the phase is a cycle.** `holon
+   lint --pack genome` shells out to `scripts/genome lint`, which read `[app] lint` and
+   shelled back to holon. The recursion is gone, but the lesson generalises: `[app] lint`
+   must never name a tool whose own lint runs `genome lint`.
+
+The other two firmed up the silence rule. paperclip-zeroclaw-adapter declares
+`toolchain = "node"` and no phases, because its `package.json` has no `scripts` block, and
+naming a `test` that does not exist would be a declaration pointing at nothing.
+ishan-parihar declares no `[app]` at all: a metric portfolio has no build, and an app
+check that invented a toolchain for it would be noise rather than integrity.
+
+And the module earned its keep in the first week: E309 found
+`.genome/overrides/RECORDS_TPL.md` tracked while `.genome/` ignored it, a contradiction
+git tolerates and no previous gate could see.
