@@ -2,7 +2,7 @@
 
 > Documentation archetype C: the README IS the data — a curated, browseable index of third-party resources. README length band 400–2700 lines. Exemplars: public-apis/public-apis (2655 L), codecrafters-io/build-your-own-x (505 L).
 >
-> This classifies the *documentation role* the README plays — the *technology shape* is classified separately by `oss-project-types.md`; the two axes are orthogonal. Gold-standard README patterns live in `readme-craft.md`; this file is an additional reference, not a replacement. See `references/docs/archetypes.md` for the full 5-archetype routing table.
+> This classifies the *documentation role* the README plays — the *technology shape* is classified separately by `oss-project-types.md`; the two axes are orthogonal. Gold-standard README patterns live in `readme-craft.md`; this file is an additional reference, not a replacement. See `archetypes.md` for the full 5-archetype routing table.
 
 ## When to use / When NOT to use
 

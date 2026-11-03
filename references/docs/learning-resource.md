@@ -2,7 +2,7 @@
 
 > Documentation archetype D: the README IS the course — a single-file spine + index that carries a structured learning path, a study-guide timeline matrix, co-located worked solutions, and multi-format export. README length band 800–2000 lines. Exemplar: donnemartin/system-design-primer (1839 L).
 >
-> This classifies the *documentation role* the README plays — the *technology shape* is classified separately by `oss-project-types.md`; the two axes are orthogonal. Gold-standard README patterns live in `readme-craft.md`; this file is an additional reference, not a replacement. See `references/docs/archetypes.md` for the routing table.
+> This classifies the *documentation role* the README plays — the *technology shape* is classified separately by `oss-project-types.md`; the two axes are orthogonal. Gold-standard README patterns live in `readme-craft.md`; this file is an additional reference, not a replacement. See `archetypes.md` for the routing table.
 
 ## When to use / When NOT to use
 

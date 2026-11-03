@@ -2,7 +2,7 @@
 
 > Documentation archetype B: the README teaches a methodology first, then catalogs available agent-config/skill units as one-line bullets linking to per-skill `SKILL.md` files. README length band 150–400 lines. Exemplars: obra/superpowers (400 L), mattpocock/skills (258 L), multica-ai/andrej-karpathy-skills (171 L).
 >
-> This classifies the *documentation role* the README plays — the *technology shape* of the repo (CLI-go, library-python, operator, helm) is classified separately by `oss-project-types.md`; the two axes are orthogonal and never conflict. Gold-standard README patterns live in `readme-craft.md`; this file is an additional reference, not a replacement. See `references/docs/archetypes.md` for the full 5-archetype routing table.
+> This classifies the *documentation role* the README plays — the *technology shape* of the repo (CLI-go, library-python, operator, helm) is classified separately by `oss-project-types.md`; the two axes are orthogonal and never conflict. Gold-standard README patterns live in `readme-craft.md`; this file is an additional reference, not a replacement. See `archetypes.md` for the full 5-archetype routing table.
 
 ## When to use / When NOT to use
 
