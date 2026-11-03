@@ -189,3 +189,31 @@ module is on, and this repo's README finally links its architecture.
 The generalisation, which is the one worth keeping: **a check that cannot run on the tool's
 own scaffolding is a check nobody has seen pass.** Both defects were hidden by a tree that
 was too empty to be judged.
+
+## What the estate-wide upgrade found: E309 is the code that earns its keep
+
+`genome installs upgrade --apply` brought 73 vendored copies from `2026.11.02-43` to
+`-71`, and `installs verify` now reports the whole estate on one version. Two repos came
+back upgraded-but-broken, which the tool names itself; the estate sweep then found that
+most of the remaining errors are **E309**, the check added in this consolidation, firing
+at scale for the first time:
+
+- **quant-signals — 607 findings.** 597 are `audit/**/*.png|jpg`, which this repo's own
+  `.gitignore` (line 45, written when the screenshots were excluded for size) still
+  tracks; 10 are `.agents/` files matching `~/.gitignore_global:9`.
+- **openscript — 62 findings**, `third_party/`, vendored code the repo also ignores.
+- Ten more repos carry one to six each.
+
+The lesson worth writing down: **E309's findings were almost all invisible until the module
+was installed across the estate.** The defects predate this work by months; what was
+missing was the check, and the check was missing because it lived in a skill that was never
+a gate. That is the entire argument for consolidating the three skills into a module every
+repo can enable, and it is the strongest evidence from this session that the port was the
+right shape.
+
+One caveat on the class, because it cuts the other way: `agentic-harness/external-repos/
+deepseek-harness` tracks 3651 files under `.agents/` and they are **upstream's**, from a
+public clone — not this operator's confidential artifacts. A global ignore written for the
+operator's own machines is simply over-broad against a third-party repo, so those rows are
+not defects. The distinction is authorship, which is why `E309` reports the contradiction
+and leaves the remedy (`git rm --cached`, or an allowance) to the operator.
