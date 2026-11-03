@@ -2246,6 +2246,143 @@ def redteam5(base: Path) -> None:
     name_invariant(base)
 
 
+def integrity_module(base: Path) -> None:
+    """The three integrity axes, each firing on a violation and silent on a clean tree.
+
+    The three absorbed skills each carried one axis and none carried the other two: `doc`
+    validated prose, `install-script-creator` shipped an installer, `workspace-lint`
+    checked the tree. This case is what makes all three one discipline, and the clean
+    half is the half that matters most — a check that fires on `genome init`'s own
+    scaffolding is a check the reader learns to skip.
+    """
+    root = base / "integrity"
+    root.mkdir()
+    git(root, "init", "-q"); git(root, "config", "user.email", "t@t"); git(root, "config", "user.name", "t")
+    run(root, "init")
+    mods = 'modules = ["core", "integrity"]'
+    (root / "genome.toml").write_text(
+        (root / "genome.toml").read_text().replace('modules = ["core"]', mods, 1))
+
+    def rewrite(keep_from: str, body: str) -> None:
+        """Cut the config at `keep_from` and append a fresh section.
+
+        A TOML table may appear once, and the sections here are appended one after
+        another, so replacing the tail is the only way to keep the file valid: a
+        `drop` that left an earlier `[app]` in place produced two `[app]` tables,
+        and TOML then rejected the whole file with no lint output at all.
+        """
+        t = (root / "genome.toml").read_text().split(f"\n[{keep_from}]\n")[0]
+        (root / "genome.toml").write_text(t + "\n" + body)
+
+    def app(*lines: str) -> None:
+        """One `[app]` section, replacing whichever tail section came last.
+
+        `rewrite("app", ...)` only cuts at an `[app]` that already exists, so after the
+        `[ops]` step it left the old `dir_globs` block attached and the install-script
+        assertions ran against a config that still had directory findings in it.
+        """
+        t = (root / "genome.toml").read_text()
+        for sec in ("app", "ops", "docs"):
+            head = f"\n[{sec}]\n"
+            if head in t:
+                t = t.split(head)[0]
+                break
+        (root / "genome.toml").write_text(t + "\n[app]\n" + "".join(lines))
+
+    # ---- APP INTEGRITY: the fingerprint is INFO and never fails the build ----
+    # The single most important property: a repo with no build (a KB, a notes repo)
+    # must not be an error, and a toolchain an operator cannot run (no cargo on a
+    # laptop) must be an I, not an E.
+    (root / "pyproject.toml").write_text("[project]\nname = 'x'\n")
+    out = run(root, "lint", "--only", "integrity", "--all").stdout
+    assert "I651 app integrity: toolchain python" in out, out
+    assert "0 error(s)" in out, out
+    # and with NO manifest at all: a KB is not broken for having no toolchain
+    (root / "pyproject.toml").unlink()
+    out = run(root, "lint", "--only", "integrity", "--all").stdout
+    assert "I651" not in out and "lint: clean" in out, out   # a KB is not a finding
+    (root / "pyproject.toml").write_text("[project]\nname = 'x'\n")
+
+    # ---- a declared phase that FAILS is an E, and stops the commit ----
+    app('toolchain = "python"\nbuild = "false"\n')
+    out = run(root, "lint", "--only", "integrity", "--all", ok=False).stdout
+    assert "E651 [app] build `false` failed" in out, out
+    cl = run(root, "close", "--no-gate", ok=False).stdout
+    assert "E651" in cl, f"close must surface a failed build: {cl}"
+    # a phony pass is silent
+    app('toolchain = "python"\nbuild = "true"\n')
+    out = run(root, "lint", "--only", "integrity", "--all").stdout
+    assert "E651" not in out, out
+
+    # ---- DOCS INTEGRITY: required docs, with content, and required sections ----
+    rewrite("app", '[docs]\nrequired = ["README.md", "AGENTS.md", "docs/ARCHITECTURE.md"]\n'
+                     'sections = { "docs/ARCHITECTURE.md" = ["Components"] }\n'
+                     'min_lines = 30\nmax_lines = 200\n')
+    (root / "README.md").write_text("# X\n" + "filler\n" * 250)     # long, no TOC -> W651
+    (root / "docs").mkdir(exist_ok=True)
+    (root / "docs" / "ARCHITECTURE.md").write_text("# A\n" + "filler\n" * 40)   # wrong section
+    out = run(root, "lint", "--only", "integrity", "--all", ok=False).stdout
+    assert "E654 docs/ARCHITECTURE.md is missing the required section `Components`" in out, out
+    assert "W651 README.md" in out and "table of contents" in out, out
+    # min_lines is what makes a doc "thin": a 251-line README is past it, so no W653
+    assert "W653 README.md" not in out, out
+    # an absent required doc is an E
+    (root / "README.md").unlink()
+    out = run(root, "lint", "--only", "integrity", "--all", ok=False).stdout
+    assert "E653 README.md is declared required by [docs] and does not exist" in out, out
+    # a doc that exists but holds only a heading is still an E653 — the half a naive
+    # existence check misses, and the reason this is not just `os.path.exists`
+    (root / "README.md").write_text("# Only a title\n")
+    out = run(root, "lint", "--only", "integrity", "--all", ok=False).stdout
+    assert "E653 README.md" in out and "no content beyond its heading" in out, out
+    # real content but under min_lines is the WARNING: opt-in, because a hardcoded
+    # band flagged every fresh init's stub
+    (root / "README.md").write_text("# Title\n\nOne real sentence of prose.\n")
+    out = run(root, "lint", "--only", "integrity", "--all", ok=False).stdout
+    assert "W653 README.md" in out and "min_lines = 30" in out, out
+    # with min_lines unset, the thin WARNING is silent (the section E654 above still
+    # fails the run, so the assertion is on the code's absence, not the exit)
+    rewrite("docs", '[docs]\nrequired = ["README.md", "AGENTS.md", "docs/ARCHITECTURE.md"]\n'
+                     'sections = { "docs/ARCHITECTURE.md" = ["Components"] }\n')
+    out = run(root, "lint", "--only", "integrity", "--all", ok=False).stdout
+    assert "W653" not in out, out
+    # ---- DIRECTORY INTEGRITY: declared dirs must exist; stranger empties must not ----
+    rewrite("docs", '[ops]\ndir_globs = ["docs/plans", "docs/audit", "vendor/*", "nowhere/*"]\n')
+    (root / "vendor").mkdir(); (root / "vendor" / "extra").mkdir()
+    out = run(root, "lint", "--only", "integrity", "--all", ok=False).stdout
+    assert "E655 nowhere/*" in out and "does not exist" in out, out
+    assert "E656 vendor/extra/" in out and "is empty" in out, out
+    # ROLE dirs are exempt from E656, because `genome init` creates them empty and they
+    # fill as the work happens. Measured 2026-11-03: without this, docs/plans of a fresh
+    # tree failed, which is the tool's own scaffolding, so the reader skipped the code.
+    assert "E656 docs/plans" not in out and "E656 docs/audit" not in out, out
+
+    # ---- INSTALL-SCRIPT INTEGRITY: declared, executable, verifying ----
+    app('install_script = "scripts/setup.sh"\n')
+    out = run(root, "lint", "--only", "integrity", "--all", ok=False).stdout
+    assert "E657 install script `scripts/setup.sh`" in out, out
+    # ONE report for one missing file: the E652/E657 overlap was a real defect found here
+    assert out.count("install script `scripts/setup.sh`") == 1, out
+    (root / "scripts").mkdir()
+    (root / "scripts" / "setup.sh").write_text("#!/bin/sh\necho hi\n")
+    os.chmod(root / "scripts" / "setup.sh", 0o644)
+    out = run(root, "lint", "--only", "integrity", "--all", ok=False).stdout
+    assert "E658 scripts/setup.sh is not executable" in out, out
+    assert "W655" in out and "verification step" in out, out
+    # executable AND verifying: silent
+    (root / "scripts" / "setup.sh").write_text("#!/bin/sh\necho verify\n")
+    os.chmod(root / "scripts" / "setup.sh", 0o755)
+    out = run(root, "lint", "--only", "integrity", "--all").stdout
+    assert "E658" not in out and "W655" not in out, out
+
+
+@case
+def redteam6(base: Path) -> None:
+    integrity_module(base)
+
+
+
+
 def main() -> None:
     names = sys.argv[1:] or list(CASES)
     unknown = [n for n in names if n not in CASES]

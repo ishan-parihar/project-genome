@@ -108,7 +108,7 @@ def resolve_kb(target: str) -> Path:
     die(f"no knowledge base named '{target}' ({len(rows)} registered — `genome kb list`)", ERR)
 
 
-def kb_lint_one(path: Path) -> tuple[int, int, list[str]]:
+def kb_lint_one(path: Path) -> tuple[int, int, int, list[str]]:
     """Lint one KB by running ITS OWN vendored CLI, so the check is the KB's own rules.
 
     A KB that vendors no CLI cannot lint itself; that is reported as 'no CLI here'
@@ -119,26 +119,30 @@ def kb_lint_one(path: Path) -> tuple[int, int, list[str]]:
     carries 100 warnings across 79 KBs and the cap turned that into 11 rows of bare
     counts with no code and no remedy — the aggregation that hides both the finding
     and its fix, which is the same defect the per-repo post-upgrade list was built to
-    stop. The caller counts; the codes are the point."""
+    stop. The caller counts; the codes are the point.
+
+    An older CLI that emits no `info` key reports 0, which is the right answer for it:
+    a KB at an older release has no info-level checks to run."""
     script = _script_of(path)
     if not script.is_file():
-        return (0, 0, ["no CLI in this KB — nothing to lint with"])
+        return (0, 0, 0, ["no CLI in this KB — nothing to lint with"])
     try:
         r = subprocess.run([sys.executable, str(script), "lint", "--json"],
                            cwd=str(path), capture_output=True, text=True, timeout=180)
     except (OSError, subprocess.TimeoutExpired) as e:
-        return (0, 0, [f"lint failed to run: {e}"])
+        return (0, 0, 0, [f"lint failed to run: {e}"])
     out = r.stdout.strip()
     if not out:
-        return (0, 0, [(r.stderr.strip().splitlines() or ["lint produced no output"])[-1]])
+        return (0, 0, 0, [(r.stderr.strip().splitlines() or ["lint produced no output"])[-1]])
     try:
         j = json.loads(out)
     except ValueError:
-        return (0, 0, [f"lint output was not JSON: {out[:120]}"])
+        return (0, 0, 0, [f"lint output was not JSON: {out[:120]}"])
     errs = int(j.get("errors", 0))
     warns = int(j.get("warnings", 0))
+    infos = int(j.get("info", 0))
     findings = [f"{f.get('code','?')} {f.get('text','')}" for f in j.get("findings", [])]
-    return (errs, warns, findings)
+    return (errs, warns, infos, findings)
 
 
 def _remedies_for(codes) -> str:
@@ -238,14 +242,15 @@ def cmd_kb(args) -> None:
             targets = [resolve_kb(args.target)]
         else:
             targets = [find_cfg().root]
-        total_e = total_w = 0
+        total_e = total_w = total_i = 0
         failures = []
         no_cli = []
         codes: dict[str, list[str]] = {}  # code -> the KBs carrying it, for the remedy summary
         for t in targets:
-            errs, warns, findings = kb_lint_one(t)
+            errs, warns, infos, findings = kb_lint_one(t)
             total_e += errs
             total_w += warns
+            total_i += infos
             label = _kb_label(t)
             if findings and findings[0].startswith("no CLI"):
                 # a KB with no local CLI is UNLINTED, not clean: saying 'ok' here
@@ -254,7 +259,10 @@ def cmd_kb(args) -> None:
                 print(f"skip  {label:34} no CLI in this KB — nothing to lint with")
                 continue
             status = "ok" if not errs and not findings else ("FAIL" if errs else "warn")
-            print(f"{status:5} {label:34} {errs} error(s), {warns} warning(s)")
+            # an `info` finding does not change the status: it is a fact to see, and
+            # one KB reporting it must not make the estate read as failing
+            tail = f", {infos} info" if infos else ""
+            print(f"{status:5} {label:34} {errs} error(s), {warns} warning(s){tail}")
             # EVERY finding, not the first three. Measured 2026-10-31, the cap hid the
             # 4th and later ones and the codes with them, so a per-KB line was a count
             # with no way to act on it — the same defect `_post_upgrade_findings` was
@@ -268,6 +276,7 @@ def cmd_kb(args) -> None:
             if errs:
                 failures.append(label)
         print(f"\nkb lint: {len(targets)} KB(s), {total_e} error(s), {total_w} warning(s)"
+              + (f", {total_i} info" if total_i else "")
               + (f", {len(no_cli)} with no CLI to lint with" if no_cli else ""))
         # THE REMEDY IS THE POINT. A numbered list of codes without the command that
         # clears each one turns a lint into another thing to research, so the

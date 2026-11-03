@@ -122,6 +122,40 @@ which keeps the file and ends the contradiction.
 This is not E305 (regenerable bulk in git) and not E306 (a misplaced file): both of those run `ls-files -co`
 and answer what is tracked. Only `-i` names the contradiction.
 
+## Directories you declare (`ops.dir_globs`)
+
+**E655** asks that a declared directory exists, and **E656** that a declared one is not empty. The inverse of
+`dir_requires`, which asks what a directory that exists must hold.
+
+```toml
+dir_globs = ["docs/plans", "docs/audit", "docs/regressions"]
+```
+
+A genome ROLE's home is exempt from E656, because `genome init` creates those empty and they fill as the work
+happens — `docs/plans/` holding nothing on a new repo is a lifecycle, not a defect.
+
+## Application integrity (`[app]`, `[docs]`)
+
+A new module, added 2026-11-03 with the codes **E651–E658 / W651–W655 / I651**, documented in
+`references/lint-rules.md` and carried in the `integrity` module. The short version:
+
+```toml
+[app]
+toolchain = "python"          # or rust, node, typescript, go, java, shell — inferred from the manifest
+build = "python3 -m compileall -q ."
+test = "python3 -m pytest -q"
+install_script = "scripts/setup.sh"
+
+[docs]
+required = ["README.md", "AGENTS.md", "docs/ARCHITECTURE.md"]
+sections = { "docs/ARCHITECTURE.md" = ["Components", "Decisions"] }
+max_lines = 400
+min_lines = 40                   # unset = no thin-doc warning; a hard band flagged every fresh init stub
+```
+
+An `I651` is a fact, not a defect: a repo with no build (a KB, a notes repo) is not broken, and a toolchain
+that cannot run on this machine is a fact about the machine. Only `E` fails a gate.
+
 ## Commands in genome.toml run as code
 
 `core.gate`, `core.emitters` and `ops.jobs` are shell commands. `close` runs the first two and `wake` runs the

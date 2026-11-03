@@ -1,7 +1,7 @@
 # genome.toml — modules on, role → path map, module settings. Edit freely.
 [genome]
 schema_version = 2
-modules = ["core", "records"]
+modules = ["core", "records", "integrity"]
 
 [paths]
 agents = "AGENTS.md"
@@ -22,7 +22,7 @@ regressions = "docs/regressions"
 records_index = "docs/RECORDS.md"
 
 [core]
-gate = "uv build --wheel --sdist >/dev/null && python3 scripts/test_genome.py && python3 scripts/test_package.py && python3 scripts/test_package_modes.py && python3 scripts/build.py --check && python3 scripts/check_ps1.py && python3 scripts/genome lint --code E306 E308 E309 --all"
+gate = "uv build --wheel --sdist >/dev/null && python3 scripts/test_genome.py && python3 scripts/test_package.py && python3 scripts/test_package_modes.py && python3 scripts/build.py --check && python3 scripts/check_ps1.py && python3 scripts/genome lint --code E306 E308 E309 E651 E653 E654 E655 E656 E657 E658 --all"
 # The gate `genome close` runs. Suite-only on purpose: it must pass in a few minutes and need
 # nothing but the stdlib, so it runs before every push. The structure checks (E306 layout,
 # E308 a directory name, E309 tracked-and-ignored) are gated too, because a misplaced file
@@ -41,3 +41,20 @@ never_commit = []          # globs `genome close` leaves out of the named-path c
 [records]
 prefix = ""                # e.g. "PQF" → PQF-AD-001
 mode = "immutable"         # or "amendable" (dated ## Amendment sections)
+
+# This repo's integrity law. A Python CLI whose checks are its own test suite, so the
+# gate above already runs them; declaring them here is what makes `genome lint --only
+# integrity` answer the same question in one command instead of a shell string.
+[app]
+toolchain = "python"
+build = "python3 scripts/build.py --check"
+test = "python3 scripts/test_genome.py"
+lint = "python3 scripts/check_ps1.py"
+
+[docs]
+required = ["README.md", "AGENTS.md", "docs/ARCHITECTURE.md"]
+sections = { "docs/ARCHITECTURE.md" = ["Modules", "Commands"] }
+max_lines = 600
+
+[ops]
+dir_globs = ["docs/plans", "docs/audit", "docs/decisions", "docs/regressions"]

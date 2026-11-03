@@ -72,6 +72,26 @@ E309 is the one that found real defects the day it was written: operant tracks
 tracks `.genome/overrides/RECORDS_TPL.md` while `.genome/` ignores it. Both are now
 green after the remedy, which is the point of the check.
 
+## The three integrity axes the consolidation actually closed
+
+The port above is complete and byte-verified. What the port exposed is bigger: all three
+skills validated a *surface* — prose, an installer, a tree — and none of them could ask
+**does this application still build**. The `integrity` module (`E651`–`E658`, `W651`–`W655`,
+`I651`) closes that, and it is the same three-axis discipline in each case:
+
+- **app** — `[app] toolchain` names the language or genome infers it from the manifest, and
+  `[app] build` / `test` / `typecheck` / `lint` run it. A failed phase is `E651`.
+- **docs** — `[docs] required` names the documents a project owes its readers, and
+  `sections` the headings one must carry. An absent or heading-only required doc is
+  `E653`.
+- **dirs** — `ops.dir_globs` names directories that must exist (`E655`) and must not be
+  empty (`E656`, unless the dir is a genome role's home).
+
+Three severities now, and only one fails a build — `I651` states a fact an operator should
+see (a toolchain genome found but could not run here) without turning it into a gate
+failure. The config is per-project and per-lifecycle: a CLI declares its Rust build, a
+knowledge base declares nothing and is asked nothing.
+
 ## The one thing to actually port
 
 If a repo already has a `workspace-lint.yaml`, do not hand-transcribe it blindly.

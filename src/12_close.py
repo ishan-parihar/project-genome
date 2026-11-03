@@ -108,7 +108,14 @@ def cmd_close(args) -> None:
         print(f"emit   genome zones refreshed: {', '.join(changed)}")
     lint = run_lint(cfg)
     errs = [f for f in lint if f.startswith("E")]
-    print(f"lint   {len(errs)} error(s), {len(lint) - len(errs)} warning(s)")
+    warns = [f for f in lint if f.startswith("W")]
+    infos = [f for f in lint if f.startswith("I")]
+    counts = [f"{len(errs)} error(s)"]
+    if warns:
+        counts.append(f"{len(warns)} warning(s)")
+    if infos:
+        counts.append(f"{len(infos)} info")
+    print(f"lint   {', '.join(counts)}")
     for f in errs[:20]:
         print(f"       {f}")
     red |= bool(errs)

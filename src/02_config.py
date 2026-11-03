@@ -15,7 +15,7 @@ class Cfg:
         self.declared = {k for k in raw if isinstance(raw[k], str)}
         self.zones_declared = "zones" in data.get("records", {})
         self.paths = {**DEFAULT_PATHS, **{k: v for k, v in raw.items() if isinstance(v, str)}}
-        self.sec = {s: dict(data.get(s, {})) for s in ("core", "records", "research", "ops", "card", "federation", "drift", "index")}
+        self.sec = {s: dict(data.get(s, {})) for s in ("core", "records", "research", "ops", "card", "federation", "drift", "index", "app", "docs")}
         self.schema_version = int(g.get("schema_version", 0))
         self.kinds = dict(data.get("kinds", {}))
         self.views = dict(data.get("views", {}))

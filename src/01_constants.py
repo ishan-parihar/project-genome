@@ -1,10 +1,15 @@
 # ---------------------------------------------------------------- constants
 
 JSON_CMDS = {"ask", "lint", "doctor", "new", "show", "find", "graph", "place", "card", "impact"}  # commands with a --json form
-MODULES = ("core", "records", "research", "ops", "agents", "outline")
+MODULES = ("core", "records", "research", "ops", "agents", "outline", "integrity")
 PROFILES = {
-    "software": ["core", "records"],
-    "research": ["core", "records", "research", "ops"],
+    # `integrity` is in every profile but `team`: a project-grade repo should always be
+    # able to answer "does it still build", "are its required docs there" and "is its
+    # declared shape intact", and those questions are what the module asks. A team
+    # coordination repo has no build, so `init --profile team` leaves it out and the
+    # silence is honest — a repo with no `[app]` gets no app finding at all.
+    "software": ["core", "records", "integrity"],
+    "research": ["core", "records", "research", "ops", "integrity"],
     "team": ["core", "records", "agents"],
     "full": list(MODULES),
 }
@@ -56,6 +61,11 @@ MODULE_ROLES = {
     "ops": ["ownership_map"],
     "agents": ["feed", "workflows"],
     "outline": ["agents"],
+    # integrity owns NO role path: it validates `[app]`'s toolchain, `[docs]`'s required
+    # documents and the ops-declared dirs, all of which already live in another
+    # module's space. Scaffolding a dir for it would create an empty one, which E606
+    # then reports. An empty list is the honest entry, and `genome init` needs it.
+    "integrity": [],
 }
 APPEND_ONLY = ("ledger", "worklog", "feed", "prereg", "quarantine")
 TOMBSTONE = re.compile(r"<!--\s*kb: tombstone target=\"([^\"]+)\"")
@@ -89,7 +99,7 @@ ERR = 2
 MIN_CHUNK = 5  # lines; `ask` hits narrower than this point at a lead line without its content
 HUB_NODE_CAP = 3000  # nodes; above this `graph hubs` ranks by degree and says betweenness was not computed
 _TMP_SEQ = itertools.count()  # makes each atomic_write temp name unique within this process too
-VERSION = "2026.11.02-48"
+VERSION = "2026.11.02-60"
 # every key genome reads: an unknown key is a typo that would silently switch a check off (E017)
 CONFIG_KEYS = {
     "genome": {"modules", "schema_version"},
@@ -104,7 +114,16 @@ CONFIG_KEYS = {
     "research": {"classes", "figure_pattern", "hyp_prefix", "hyp_statuses", "surfaces", "quarantine_surfaces"},
     "ops": {"bulk_allow", "bulk_globs", "code_globs", "code_roots", "jobs", "link_prefixes", "link_surfaces",
             "max_bytes", "owner_exempt", "owner_globs", "py_paths", "secrets", "root_files", "dir_suffixes",
-            "dir_requires", "stale_terms", "stale_exempt", "external_ok", "dir_name_patterns", "dir_name_exempt"},
+            "dir_requires", "dir_globs", "stale_terms", "stale_exempt", "external_ok",
+            "dir_name_patterns", "dir_name_exempt"},
+    # `app` is the language-agnostic application/system-integrity declaration. A repo
+    # writes what its toolchain IS (python, cargo, npm...) and genome runs the check
+    # that toolchain defines, instead of the operator hand-writing one shell string
+    # that no other command can inspect. Every key is optional: an undeclared toolchain
+    # is simply not checked, and the fingerprint is reported as info, never as an error.
+    "app": {"toolchain", "build", "test", "typecheck", "lint", "fmt", "doc", "install_script", "install_probe",
+            "entry", "requires", "provides", "manifest", "readme", "agents", "architecture"},
+    "docs": {"required", "sections", "max_lines", "require_toc"},
     "outline": {"zones"},
 }
 STALE_DOCS = ("*.md", "*.yaml", "*.yml", "*.toml", "*.txt", "*.rst")  # stale paths matter where people read
@@ -118,6 +137,7 @@ CONVENTIONAL_ROOT_DOCS = {
     "NOTICE.md", "SKILL.md",
 }
 SEVERITIES = ("Critical", "High", "Medium", "Low")
+SEVERITY = {"E": "error", "W": "warning", "I": "info"}  # only `E` fails a build; see cmd_lint
 STOP = set("the and for what where which how does did are was were this that with from into when who why "
            "should can its it's our your about have has not any all in is it of on or to we an as at by do if "
            "me my no so up us be he".split())

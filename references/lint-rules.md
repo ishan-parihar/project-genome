@@ -102,3 +102,29 @@ Errors are doctrine violations. Warnings are hygiene, or judgement the linter ca
 | W403 | the `verified` sha is not in this repo's history | re-verify at a current commit |
 | W404 | `covers` matches no tracked file | fix the glob, or the code moved |
 
+## integrity (app / docs / directory)
+
+Added 2026-11-03, when the three absorbed skills' rules were folded into one module. Every
+code below is configurable from `genome.toml` (`[app]`, `[docs]`, `ops.dir_globs`), so a
+repo states its own integrity law rather than inheriting a linter's opinion.
+
+| Code | Meaning | Fix |
+|---|---|---|
+| I651 | the toolchain fingerprint, or a probe that cannot run on this machine | none — an I never fails a build; it names what was checked |
+| E651 | a declared `[app]` phase (`build` / `test` / `typecheck` / `lint`) failed | fix the code, or correct the command |
+| W654 | an advisory phase (`fmt` / `doc`) failed | run the formatter, or accept the drift |
+| E652 | a declared `entry` or `manifest` does not exist | fix the path |
+| E653 | a `[docs] required` document is absent, or holds no content beyond its heading | write the document |
+| E654 | a `[docs] sections` section is missing from a required doc | add the section |
+| W653 | a required doc is under `docs.min_lines` | write more, or unset `min_lines` |
+| W651 | a required doc is over `docs.max_lines` with no table of contents | add a `## Contents` |
+| E655 | an `ops.dir_globs` directory does not exist | create it, or drop the glob |
+| E656 | a declared directory exists and is empty (and is not a role's home) | add content, or drop the glob |
+| E657 | a declared or inferred install script does not exist | fix `app.install_script` |
+| E658 | an install script is not executable | `chmod +x` it |
+| W655 | an install script names no verification step | add a `verify` / `--version` probe |
+
+A genome ROLE directory is exempt from E656: `genome init` creates those empty and they
+fill as the work happens, so its emptiness is a project's lifecycle, not a defect.
+
+

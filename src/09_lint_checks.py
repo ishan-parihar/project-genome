@@ -711,20 +711,32 @@ def cmd_lint(args) -> None:
     found = run_lint(cfg, args.only)
     if args.code:
         found = [f for f in found if f.startswith(tuple(args.code))]
+    # Three severities, and only one of them stops the build. An `I` finding is a
+    # fact an operator should see (this repo declares a Rust build but no cargo
+    # binary is on PATH) that no check can call a defect: flagging it as a warning
+    # would train the reader to ignore warnings, and as an error it would block a
+    # commit for something the environment, not the repo, owns.
     errs = [f for f in found if f.startswith("E")]
+    infos = [f for f in found if f.startswith("I")]
+    warns = [f for f in found if f.startswith("W")]
     if args.json:
-        jprint({"errors": len(errs), "warnings": len(found) - len(errs), "modules": sorted(cfg.modules),
-                "findings": [{"code": f[:4], "severity": "error" if f[0] == "E" else "warning", "text": f[5:]} for f in sorted(found)]})
+        jprint({"errors": len(errs), "warnings": len(warns), "info": len(infos), "modules": sorted(cfg.modules),
+                "findings": [{"code": f[:4], "severity": SEVERITY[f[0]], "text": f[5:]} for f in sorted(found)]})
         raise SystemExit(ERR if errs and not args.advisory else 0)
     by: dict[str, list[str]] = {}
-    for f in sorted(found, key=lambda s: (s[0] == "E", s)):
+    for f in sorted(found):
         by.setdefault(f[:4], []).append(f)
     for code, items in by.items():  # capped per code: lint output is read by agents, every line costs
         for f in items if args.all else items[:5]:
             print(f)
         if not args.all and len(items) > 5:
             print(f"{code} ... {len(items) - 5} more (`genome lint --code {code} --all`)")
-    print(f"lint: {len(errs)} error(s), {len(found) - len(errs)} warning(s) [{', '.join(sorted(cfg.modules))}]"
+    parts = [f"{len(errs)} error(s)"]
+    if warns:
+        parts.append(f"{len(warns)} warning(s)")
+    if infos:
+        parts.append(f"{len(infos)} info")
+    print(f"lint: {', '.join(parts)} [{', '.join(sorted(cfg.modules))}]"
           if found else f"lint: clean [{', '.join(sorted(cfg.modules))}]")
     raise SystemExit(ERR if errs and not args.advisory else 0)
 

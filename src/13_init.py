@@ -134,6 +134,7 @@ MODULE_HELP = {
     "ops": "secrets + lint gates: ownership map, links, unreachable code, tracked bulk, running-job guard",
     "agents": "wf new|add|list, claim, done, claim-register, post, feed (parallel agents)",
     "outline": "outline | outline-check (the stack zone in AGENTS.md, derived from the tree)",
+    "integrity": "app build/test/lint by toolchain, [docs] required docs and sections, ops.dir_globs",
 }
 
 
