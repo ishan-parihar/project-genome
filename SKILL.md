@@ -74,10 +74,11 @@ re-derived) pointed at a reader:
 | **Installer** — `install.sh`, `install.ps1`, harness wiring | "make it installable", "one-line install", "setup/bootstrap script", "wire this MCP server into my harnesses" | `references/installer.md` |
 | **Repo surface** — About, topics, `FUNDING.yml`, `LICENSE` | "fix my repo descriptions/topics", "add sponsorship", or any new repo | `references/surface.md` |
 
-All three were standalone skills (`doc`, `install-script-creator`) and are now
-references here: same workflows, same validation scripts, one entry point. The
-depth is unchanged and lives under `references/docs/`, `references/installer/`,
-`scripts/docs/` and `assets/installer/`.
+`doc` and `install-script-creator` were standalone skills and are now references
+here; the repo-surface rules were written here from the start. Same workflows,
+same validation scripts, one entry point. The depth is unchanged and lives under
+`references/docs/`, `references/installer/`, `scripts/docs/` and
+`assets/installer/`.
 
 The boundary between docs and the genome is `references/docs/project-genome-seam.md`:
 state, worklog, records and evidence are genome roles; the README and `docs/`
@@ -160,6 +161,11 @@ commit stays deliberate and uses named paths. It exits 2 on any of:
 
 Lint prints at most 5 lines per code, with a count of the rest, because the output is read by agents. Every code
 and its fix is in `references/lint-rules.md`.
+
+Questions about the tree's own shape — "organize files", "clean up directory", "where should I put
+this", "orphaned files at the root", "stray build artifacts" — are this module's class, and the
+absorbed `workspace-lint` skill lives at `references/workspace-lint.md`: its `workspace-lint.yaml`
+keys mapped to `[ops]` gates, and why `--fix` was deliberately not carried over.
 
 ## Cold start (new repo)
 
