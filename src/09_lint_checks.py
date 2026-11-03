@@ -22,6 +22,11 @@ def lint_core(cfg: Cfg) -> list[str]:
                    f"{SCHEMA_VERSION} — `genome migrate` (an unmigrated repo reads every "
                    f"membership glob with the old dialect, so its checks read the wrong patterns)")
     out += lint_layout(cfg)   # root placement is a core invariant, not an ops option
+    # A directory's NAME is a core invariant too: a collision is a defect with no config to
+    # declare it, so it runs everywhere. The tracked-but-ignored contradiction is likewise a fact
+    # about git, not an option, so it runs everywhere too.
+    out += lint_dir_names(cfg)
+    out += lint_tracked_but_ignored(cfg)
     out += [f"W507 [paths] {k} is retired (no role uses it); `genome migrate` removes it" for k in RETIRED_PATHS
             if k in cfg.declared]
     if cfg.schema_version < 2:  # the one-dialect change: say what `genome migrate` will rewrite
@@ -513,6 +518,117 @@ def lint_root_placement(cfg: Cfg) -> list[str]:
     """
     return [f"E306 {f}: no role points here — move it under docs/, or give it a role"
             for f in misplaced_paths(cfg)]
+
+
+def lint_dir_names(cfg: Cfg) -> list[str]:
+    """E308: a directory whose name breaks a declared pattern, or collides with a sibling.
+
+    The absorbed workspace-lint validator carried two checks genome had no answer
+    for. Both are about a directory's NAME, not its contents, so neither belongs
+    in `dir_suffixes` (what may live inside) or `dir_requires` (what must exist).
+
+    **Patterns** (`ops.dir_name_patterns`) catch names that are illegal by
+    convention rather than by placement: leading/trailing whitespace, a stray
+    prefix left by a copy, an unnormalized unicode dash. A pattern like
+    `^\\s|\\s$` is the usual one, but any regex the repo declares is honoured, so
+    a project with its own naming law states it once instead of in prose.
+
+    **Collisions** (`ops.dir_name_exempt` may name one) are surfaced separately
+    because they are the half people do not expect. Two directories whose names
+    differ only by case, whitespace or a zero-width mark are one directory to a
+    reader and two to git: `PHANTOM` beside `phantom`, or `Docs` beside `docs`.
+    Git tracks both, they never merge, and every agent that opens one wonders
+    which is live. No config declares a collision, which is why it is reported
+    with no pattern at all — but the exemption still applies, because a repo that
+    carries `fonts/Font` and `fonts/font` on purpose has said so, and a gate that
+    cannot be satisfied stops being read.
+    """
+    out = []
+    pats = cfg.get("ops", "dir_name_patterns", [])
+    exempt = cfg.get("ops", "dir_name_exempt", [])
+
+    def pattern_bad(d: str) -> str | None:
+        for p in pats:
+            try:
+                if re.search(p, d):
+                    return p
+            except re.error:
+                continue    # a bad pattern is a config error reported by lint, not a crash here
+        return None
+
+    # Siblings are grouped and THEN judged, rather than judged in walk order. Two
+    # directories that normalize to one name are a group, and a group is reported
+    # once: naming every member would print N lines for one defect, and reporting
+    # only the pair the readdir happened to yield first would make the answer
+    # depend on the filesystem. os.walk's order is the directory's, not ours.
+    for dirpath, dirnames, _ in os.walk(cfg.root):
+        dirnames[:] = sorted(d for d in dirnames if not d.startswith((".", "__")))
+        groups: dict[str, list[str]] = {}
+        for d in dirnames:
+            # Case, whitespace and the invisible marks are folded, because
+            # `PHANTOM-PHASE` and `PHANTOM\u2010PHASE` are one directory to a reader
+            # and two to git. `\u200b` is stripped rather than normalized to keep the
+            # CLI import-free for the class that actually occurs.
+            groups.setdefault(d.casefold().strip().replace(" ", "").replace("\u200b", ""), []).append(d)
+        for norm, members in groups.items():
+            rels = [cfg.rel(Path(dirpath) / d) for d in members]
+            # A colliding group is judged on its NON-EXEMPT members. Exempting one
+            # name is a statement about that name, not about its siblings: a repo with
+            # `fonts/Font` and `fonts/font` on purpose exempts them, and a stray third
+            # is still reported. Fewer than two non-exempt members is not a defect.
+            live = [(r, d) for r, d in zip(rels, members)
+                    if not any(gmatch(r, g, cfg) for g in exempt)]
+            if not live:                     # the whole group is exempt: nothing to judge
+                continue
+            if len(live) == 1:
+                # the pattern half: a NAME the project forbids, wherever it sits
+                p = pattern_bad(live[0][1])
+                if p:
+                    out.append(f"E308 {live[0][0]}/ matches ops.dir_name_patterns `{p}` — rename it")
+                continue
+            # the collision half: one group, one line, every non-exempt member named
+            names = ", ".join(f"{r}/" for r, _ in live)
+            out.append(f"E308 {names} normalize to the same directory name — merge them, "
+                       f"rename one, or add an ops.dir_name_exempt entry")
+            # a pattern in a colliding group is still worth saying: fixing the
+            # spelling does not fix the collision, but it is the same file's fault
+            for r, d in live:
+                p = pattern_bad(d)
+                if p:
+                    out.append(f"E308 {r}/ matches ops.dir_name_patterns `{p}` — rename it")
+    return out
+
+
+def lint_tracked_but_ignored(cfg: Cfg) -> list[str]:
+    """E309: a file git tracks and .gitignore ignores at the same time.
+
+    `git ls-files -i -c --exclude-standard` names tracked files matching an
+    ignore pattern. Both facts are true simultaneously, which is the defect:
+    tracking wins on `git status`, so the file is committed and diffed as normal,
+    while the ignore rule that supposedly excludes it applies to nothing. Every
+    generator that writes that path produces an untracked sibling beside a
+    tracked one, and the next `git add` of the directory adds the wrong file.
+
+    This is NOT E305 (regenerable bulk in git) and NOT E306 (misplaced file):
+    both of those run `ls-files -co` and answer what is tracked; only `-i` names
+    the contradiction, which is why the check did not exist. Genome never passed
+    `-i`, so no lint path could see it.
+
+    The remedy is the one the absorbed validator gave, and it is a git decision,
+    not a rename: `git rm --cached` keeps the working file and stops tracking
+    it, which is what an ignore rule that already matches it wants.
+    """
+    out = []
+    allow = set(cfg.get("ops", "bulk_allow", []))
+    for f in sh(cfg.root, "git", "ls-files", "-i", "-c", "--exclude-standard", "-z").split("\0"):
+        f = f.strip()
+        if not f or not (cfg.root / f).exists():
+            continue    # a staged deletion is already the resolution
+        if f in allow or any(gmatch(f, g, cfg) for g in allow):
+            continue
+        out.append(f"E309 {f} is tracked and also matches .gitignore — `git rm --cached {f}` "
+                   f"(keeps the file, stops the contradiction)")
+    return out
 
 
 def lint_layout(cfg: Cfg) -> list[str]:

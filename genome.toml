@@ -22,11 +22,13 @@ regressions = "docs/regressions"
 records_index = "docs/RECORDS.md"
 
 [core]
-gate = "uv build --wheel --sdist >/dev/null && python3 scripts/test_genome.py && python3 scripts/test_package.py && python3 scripts/test_package_modes.py && python3 scripts/build.py --check && python3 scripts/check_ps1.py"
+gate = "uv build --wheel --sdist >/dev/null && python3 scripts/test_genome.py && python3 scripts/test_package.py && python3 scripts/test_package_modes.py && python3 scripts/build.py --check && python3 scripts/check_ps1.py && python3 scripts/genome lint --code E306 E308 E309 --all"
 # The gate `genome close` runs. Suite-only on purpose: it must pass in a few minutes and need
-# nothing but the stdlib, so it runs before every push. The full verification adds
-# `python3 scripts/genome lint`, `python3 scripts/genome doctor`, and for a release
-# `uv build` first (the packaging suites install the BUILT artefacts in dist/).
+# nothing but the stdlib, so it runs before every push. The structure checks (E306 layout,
+# E308 a directory name, E309 tracked-and-ignored) are gated too, because a misplaced file
+# must not be able to reach the commit `close` names. The full verification adds the
+# remaining `python3 scripts/genome lint`, `python3 scripts/genome doctor`, and for a
+# release `uv build` first (the packaging suites install the BUILT artefacts in dist/).
 worklog_form = "file"      # or "numbered" (worklog = a directory of NNNN-date-slug.md + INDEX.md)
 archive_form = "flat"      # or "generations" (archive/<generation>/ + README manifest, no tombstones)
 living_plans = []          # plans that evolve (phase rows, a 'Resume here' section)

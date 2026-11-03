@@ -2125,6 +2125,127 @@ def p7_uncommitted_copy_is_reported_not_swallowed(root: Path) -> None:
     assert v.returncode in (0, 2), v.returncode
 
 
+def name_invariant(base: Path) -> None:
+    """A directory's NAME is an invariant, and the absorbed checks must both fire and be escapable.
+
+    These two rules — a forbidden directory NAME, and a file git tracks AND ignores — are
+    the only capability workspace-lint carried that genome had no answer for. Both were
+    read out of the original validator on 2026-11-02 and re-proven against the live fleet
+    the same day, where they found real defects: operant tracks Cargo.lock and
+    kernel-sidecar/uv.lock while `*.lock` ignores them, and holon tracks
+    .genome/overrides/RECORDS_TPL.md while `.genome/` ignores it.
+
+    A rule that cannot be seen failing is not a rule, so each half gets a violation and
+    each declared escape is proven to work and to be scoped.
+    """
+    root = base / "dirnames"
+    root.mkdir()
+    git(root, "init", "-q"); git(root, "config", "user.email", "t@t"); git(root, "config", "user.name", "t")
+    run(root, "init")
+
+    def ops(*lines: str) -> None:
+        """(Re)write the [ops] block: `genome init` writes none, and a table may
+        only appear once, so rewriting beats appending."""
+        body = "" if not lines else "".join(lines)
+        (root / "genome.toml").write_text((root / "genome.toml").read_text().split("\n[ops]")[0]
+                                         + f"\n[ops]\n{body}")
+
+    # ---- 1. E308: a name the project forbids. Silence is the default; a pattern declares it ----
+    (root / "docs").mkdir(exist_ok=True)
+    (root / "docs" / "00 scratch").mkdir()
+    out = run(root, "lint", "--code", "E308", "--all").stdout
+    assert "E308" not in out, f"a pattern nobody declared must be silent: {out}"
+    ops('dir_name_patterns = ["^00"]\n')
+    out = run(root, "lint", "--code", "E308", "--all", ok=False).stdout
+    assert "E308" in out and "00 scratch" in out and "dir_name_patterns" in out, out
+    # and removing that one pattern removes the error: a declaration, not a constant
+    ops()
+    out = run(root, "lint", "--code", "E308", "--all").stdout
+    assert "E308" not in out, out
+
+    # ---- 2. E308: a collision. Declared by nobody, reported with no pattern at all ----
+    # `PHANTOM` beside `phantom` is one directory to a reader and two to git. This is the
+    # shape found on the fourfold KBs before the check existed.
+    (root / "kb").mkdir(exist_ok=True)
+    (root / "kb" / "PHANTOM").mkdir()
+    (root / "kb" / "phantom").mkdir()
+    out = run(root, "lint", "--code", "E308", "--all", ok=False).stdout
+    assert "E308" in out and "normalize to the same" in out, out
+    assert "kb/PHANTOM/" in out and "kb/phantom/" in out, f"one line must name both: {out}"
+    # The group is JUDGED ONCE AND COMPLETELY, not per pair in readdir order: three
+    # directories that normalize together print one line naming all three, and the
+    # answer does not depend on which one the filesystem happened to list first.
+    (root / "kb" / " Phantom").mkdir()
+    out = run(root, "lint", "--code", "E308", "--all", ok=False).stdout
+    assert out.count("E308") == 1 and "normalize to the same" in out, out
+    for n in ("kb/PHANTOM/", "kb/phantom/", "kb/ Phantom/"):
+        assert n in out, f"{n} missing from the one group line: {out}"
+    # the exemption is per NAME, and exempting one leaves the others reported
+    ops('dir_name_exempt = ["kb/PHANTOM"]\n')
+    out = run(root, "lint", "--code", "E308", "--all", ok=False).stdout
+    assert "kb/PHANTOM/" not in out and "kb/phantom/" in out and "kb/ Phantom/" in out, out
+    # the whole group exempted is silent: a repo that carries `fonts/Font` and
+    # `fonts/font` on purpose has said so, and a gate that cannot be satisfied
+    # stops being read
+    ops('dir_name_exempt = ["kb/**"]\n')
+    out = run(root, "lint", "--code", "E308", "--all").stdout
+    assert "E308" not in out, out
+    # two plainly different names stay silent
+    shutil.rmtree(root / "kb" / "phantom"); shutil.rmtree(root / "kb" / "PHANTOM")
+    shutil.rmtree(root / "kb" / " Phantom")
+    (root / "kb" / "OBELISK").mkdir()
+    ops()
+    out = run(root, "lint", "--code", "E308", "--all").stdout
+    assert "E308" not in out, out
+
+    # ---- 3. E309: a file git tracks AND ignores. This is the measured fleet defect ----
+    # `git ls-files -i -c` is the INTERSECTION, proven in a controlled repo where a
+    # tracked-only file, an ignored-only file, and a tracked+ignored file sat side by
+    # side and only the third was reported. A union would report the root's whole
+    # vendor tree on every run, which is why the check is written the way it is.
+    (root / "data").mkdir(exist_ok=True)
+    (root / "data" / "state.jsonl").write_text('{"a": 1}\n')
+    (root / ".gitignore").write_text("data/state.jsonl\n")
+    git(root, "add", "--force", "data/state.jsonl")
+    git(root, "commit", "-qm", "the contradiction")
+    out = run(root, "lint", "--code", "E309", "--all", ok=False).stdout
+    assert "E309" in out and "data/state.jsonl" in out, out
+    assert "tracked and also matches" in out and "git rm --cached" in out, out
+    # bulk_allow is the declared escape and it works here too
+    ops('bulk_allow = ["data/state.jsonl"]\n')
+    out = run(root, "lint", "--code", "E309", "--all").stdout
+    assert "E309" not in out, out
+    # the file must still exist: a report on a path that is not there is a ghost
+    assert (root / "data" / "state.jsonl").exists(), "E309 named a path it could not see"
+
+    # ---- 4. close must withhold the contradiction — the build-time half ----
+    ops()
+    git(root, "add", "genome.toml")
+    cl = run(root, "close", "--no-gate", ok=False).stdout
+    assert "data/state.jsonl" in cl and "git add -- data/state.jsonl" not in cl, (
+        f"close must not name a tracked-and-ignored path for commit: {cl}")
+    subprocess.run(["git", "rm", "--cached", "data/state.jsonl"], cwd=root, capture_output=True)
+    out = run(root, "lint", "--code", "E309", "--all").stdout
+    assert "E309" not in out, out
+
+    # ---- 5. an undeclared key must fail loudly, never silently switch a check off ----
+    ops('dir_name_patterns = []\n')
+    out = run(root, "lint", "--code", "E017", "--all").stdout
+    assert "E017" not in out, out
+    ops('dir_name_paterns = []\n')
+    out = run(root, "lint", "--code", "E017", "--all", ok=False).stdout
+    assert "E017" in out and "dir_name_paterns" in out, (
+        f"an unknown ops key must be E017, not a silent no-op: {out}")
+    ops('dir_name_patterns = []\n')
+    out = run(root, "lint", "--code", "E017", "--all").stdout
+    assert "E017" not in out, out
+
+
+@case
+def redteam5(base: Path) -> None:
+    name_invariant(base)
+
+
 def main() -> None:
     names = sys.argv[1:] or list(CASES)
     unknown = [n for n in names if n not in CASES]

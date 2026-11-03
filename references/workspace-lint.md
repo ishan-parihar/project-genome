@@ -9,10 +9,11 @@ plus a per-project `workspace-lint.yaml`. It answered a real question — *is th
 working tree still shaped the way I declared it?* — and it answered it with a
 second linter beside the one genome already runs.
 
-Nothing was lost, but nothing was copied either, and that is the honest account:
-**the second linter is not needed, because the same rules are already kernel
-checks with codes and configuration keys.** The two overlapped almost exactly,
-which is the reason to merge rather than to vendor side by side.
+Nothing was lost. The second linter is not needed on its own terms, because
+the same rules are kernel checks with codes and configuration keys: **the two
+overlapped on almost everything, which is the reason to merge rather than to vendor
+side by side.** The three rules the kernel could not already answer were written as
+E308 and E309 below, not left behind.
 
 ## What maps to what
 
@@ -21,9 +22,11 @@ which is the reason to merge rather than to vendor side by side.
 | `structure.canonical` — dirs that must exist, with a purpose | **E306** `ops.dir_requires` (a dir missing its required file) + **E301** the ownership map |
 | `rules.root` — files allowed at the root | **E306** `ops.root_files` |
 | suffix / extension placement rules | **E306** `ops.dir_suffixes` |
-| `rules.forbid` — patterns that must not appear | **E305** tracked bulk, **E303** dead link citations |
+| `rules.forbid` — patterns that must not appear | **E305** tracked bulk, **E303** dead link citations, **E308** a forbidden directory NAME (`ops.dir_name_patterns`) |
 | orphaned files at the root | **E301** (a tracked file with no owner row) |
-| duplicate directories, stray `__pycache__` / `.pyc` / `.log` | **E305** regenerable bulk + `.gitignore`, which genome never fights |
+| duplicate directories (two names that normalize to one) | **E308**, added 2026-11-02 — the validator's duplicate scan had no genome equivalent |
+| tracked files that also match `.gitignore` | **E309**, added 2026-11-02 — `git ls-files -i -c`, which no genome check passed |
+| stray `__pycache__` / `.pyc` / `.log` | **E305** regenerable bulk + `.gitignore`, which genome never fights |
 | git hygiene | `git status` / `close`'s staleness checks; **E307** an escaping symlink |
 | the validator script itself | `genome lint` — one stdlib file, no PyYAML |
 
@@ -43,6 +46,8 @@ rests on, for a job the stdlib one already does.
 root_files = "README.md AGENTS.md LICENSE"
 dir_suffixes = { docs = "md", scripts = "py|sh" }
 dir_requires = { docs = "INDEX.md" }
+dir_name_patterns = ['^\\s|\\s$']
+dir_name_exempt = ['vendor/**']
 bulk_allow = []      # regenerable bulk may be tracked, with a reason
 owner_globs = ["docs/**/*.md"]
 ```
@@ -52,6 +57,20 @@ owner_globs = ["docs/**/*.md"]
    `[ops]`, one repo at a time.
 4. `genome ask "<question>"` finds which section owns an answer without reading
    the whole reference tree.
+
+## The two codes that were added, not mapped
+
+Three of the old validator's checks had no genome equivalent and were **written**, on
+2026-11-02, as **E308** and **E309** rather than being folded into an existing check:
+
+- a forbidden directory **name** (`ops.dir_name_patterns` / `ops.dir_name_exempt`) and
+  two siblings that normalize to one name — E308;
+- a file git **tracks and ignores** at once (`git ls-files -i -c`) — E309.
+
+E309 is the one that found real defects the day it was written: operant tracks
+`Cargo.lock` and `kernel-sidecar/uv.lock` while `*.lock` ignores them, and holon
+tracks `.genome/overrides/RECORDS_TPL.md` while `.genome/` ignores it. Both are now
+green after the remedy, which is the point of the check.
 
 ## The one thing to actually port
 

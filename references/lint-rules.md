@@ -70,6 +70,8 @@ Errors are doctrine violations. Warnings are hygiene, or judgement the linter ca
 | E305 | regenerable bulk / oversized file tracked in git | `git rm --cached` + `.gitignore`, or `ops.bulk_allow` with a reason |
 | E306 | layout: root file not in `ops.root_files`, a suffix not allowed by `ops.dir_suffixes`, a dir missing its `ops.dir_requires` file, a doc naming an `ops.stale_terms` path, a truncation-artefact name | move or rename the file, relink the doc |
 | E307 | a tracked symlink points out of the repo (another machine's tree, an external organism) | vendor the file, remove the link, or list it in `ops.external_ok` |
+| E308 | a directory whose NAME is illegal: it matches `ops.dir_name_patterns`, or two under one parent normalize to one name (`PHANTOM` / `phantom`, `Docs` / `docs`) | rename or merge them, or list the name in `ops.dir_name_exempt` |
+| E309 | a file git tracks AND `.gitignore` ignores at the same time — tracking wins, so the ignore rule applies to nothing | `git rm --cached <file>` (keeps the file, ends the contradiction) |
 
 ## agents
 

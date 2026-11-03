@@ -704,3 +704,32 @@ target is named rather than the clean link, and the exit code is not gated. 40/4
 uncommitted rows should be committed or gitignored. That is the ruling the operator
 owes, and the check above is what makes the question askable.
 - **2026-11-03T02:46** — fleet reached the shipped version: 89/89 installs at 2026.11.02-43, 0 BEHIND. operant (the one row the dispatch could not reach, committed clean at 2026.10.21-2) upgraded by hand via --accept-patch-loss, which writes .genome/genome.pre-upgrade and a 196KB local-patch.diff first, then committed as operant 724b1996 with its 8 in-flight Rust files left unstaged. The four skill roots already held relative symlinks at one canonical copy; the stale parts were the canonical copy and the global uv binary, both now -43. Closed PQ-9 (drift gone, evidence in docs/audit/2026-11-02-KERNEL-AND-SKILL-ROOTS-AT-43.md), PQ-10 (E018 shipped, premise dead) and PQ-4 (non-issue, proven from cwd=/ with a fresh dist/). PQ-1's headline is now false; its live question is custody not drift: 72 rows hold the shipped bytes on disk with an older scripts/genome at HEAD. Not done and not this seat's call: committing any of those 72.
+- **2026-11-03T05:30** — Absorbed workspace-lint's three structure rules as E308 and E309 and gated them at build time.
+
+The three standalone skills were consolidated on the meta-skill discipline. Two of workspace-lint's
+checks had no genome equivalent, and the reference had claimed they mapped to E305, which does not
+answer the question. All three are now real, with a red-team case for each:
+
+E308 (a directory NAME) — forbidden-by-declaration names (ops.dir_name_patterns, silent by default)
+plus two siblings that normalize to one name, which needs no config: PHANTOM/phantom, Docs/docs.
+Siblings are grouped and judged ONCE, so three directories print one line naming all three, and the
+answer does not depend on which one the filesystem listed first (the first two drafts did). The
+exemption is per name: exempting one member leaves the others reported, exempting the group silences it.
+
+E309 (tracked AND ignored) — `git ls-files -i -c --exclude-standard`, which no genome check passed
+before (E305 and E306 run -co and ask what is tracked). Verified in a controlled repo that -i -c is
+the INTERSECTION, not a union: a tracked-only file, an ignored-only file and a tracked-ignored file
+side by side, and only the third was named.
+
+Red-team, not theory. The suite is 41/41 (redteam5 is new). operant was carrying Cargo.lock and
+kernel-sidecar/uv.lock tracked while `*.lock` ignores them; holon was carrying
+.genome/overrides/RECORDS_TPL.md tracked while `.genome/` ignores it. Both repos' structure lints
+are otherwise clean, all four fourfold KBs are clean, and a full sweep of operant's vendor tree
+produced zero E308 findings — the checks fire on violations and stay silent on clean trees.
+
+Gated at build time, which is the point: core.gate now runs `genome lint --code E306 E308 E309` after
+the suites, so a misplaced file cannot reach the commit `close` names. `close` also withholds a
+tracked-and-ignored path for the same reason.
+
+VERSION 2026.11.02-48. The fleet's 89 vendored copies are now one release behind; `genome installs`
+regenerate updates them after the next push.

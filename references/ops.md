@@ -75,7 +75,7 @@ Values under 6 characters are ignored, since they would match by accident.
 Imports done through `importlib` or computed `sys.path` entries are not followed; list such directories in
 `ops.py_paths` (e.g. `["Shared/engines", "scripts/pipelines"]`).
 
-## Layout (`ops.root_files`, `ops.dir_suffixes`, `ops.dir_requires`, `ops.stale_terms`, `ops.stale_exempt`, `ops.external_ok`)
+## Layout (`ops.root_files`, `ops.dir_suffixes`, `ops.dir_requires`, `ops.stale_terms`, `ops.stale_exempt`, `ops.external_ok`, `ops.dir_name_patterns`, `ops.dir_name_exempt`)
 
 **E306** keeps files where they belong (it replaces a hand-built structure linter):
 - `root_files`: the only files allowed at the root (dot-files exempt);
@@ -89,6 +89,38 @@ Imports done through `importlib` or computed `sys.path` entries are not followed
 - a file named like a truncation artefact (`…truncated…`, `...x`) is always flagged.
 
 Tracked and untracked (not ignored) files are checked.
+
+## Names (`ops.dir_name_patterns`, `ops.dir_name_exempt`)
+
+**E308** asks whether a directory's NAME is legal — a different question from where it sits, which E306 already
+asks. Two directories under one parent that normalize to one name are the half that needs no configuration at
+all: `PHANTOM` and `phantom`, or `Docs` and `docs`, are one directory to a reader and two to git, so they never
+merge and every agent that opens one wonders which is live. The siblings are grouped and judged once, so three
+such directories produce one line naming all three, and the answer does not turn on which one the filesystem
+listed first.
+
+- `dir_name_patterns = ['^\\s|\\s$', '^[0-9]+\\.[ ]?']`: a regex matched against the directory name.
+  Silence is the default — a name is illegal because a project said so, not because a linter has an opinion.
+  `^\\s|\\s$` is the usual one (leading or trailing whitespace from a copy).
+- `dir_name_exempt = ['kb/PHANTOM', 'vendor/**']`: root-relative globs that name a directory the project does
+  want, whatever its shape. It is **per name**: exempting one member leaves the others reported, and exempting
+  the whole group (or its parent) silences it.
+
+```toml
+dir_name_patterns = ['^\\s|\\s$']
+dir_name_exempt = ['vendor/**', 'docs/legacy*']
+```
+
+## A file git tracks AND ignores (**E309**)
+
+`git ls-files -i -c --exclude-standard` names files that are tracked and match an ignore pattern at the same
+time. Both facts are true, which is the defect: tracking wins on `git status`, so the file is committed and
+diffed as normal, while the ignore rule that supposedly excludes it applies to nothing. Every generator that
+writes that path produces an untracked sibling beside a tracked one. The remedy is `git rm --cached <file>`,
+which keeps the file and ends the contradiction.
+
+This is not E305 (regenerable bulk in git) and not E306 (a misplaced file): both of those run `ls-files -co`
+and answer what is tracked. Only `-i` names the contradiction.
 
 ## Commands in genome.toml run as code
 
