@@ -39,10 +39,10 @@ Not modules, available in every repo: **blueprints** (ready-made and custom know
 
 | Profile | Modules |
 |---|---|
-| `software` | core, records |
-| `research` | core, records, research, ops |
+| `software` | core, records, integrity |
+| `research` | core, records, research, ops, integrity |
 | `team` | core, records, agents |
-| `full` | all six |
+| `full` | all seven |
 
 A module is added later by editing `[genome] modules` in `genome.toml`. Its checks and commands then switch on;
 `genome modules` shows what is on. Start with the smallest set that covers the project's real failure modes,
@@ -151,6 +151,7 @@ commit stays deliberate and uses named paths. It exits 2 on any of:
 | records | `rec recon <kw…>` `rec new ad\|rg "<title>" --recon T --orthogonal "<why>"` `rec amend ID --title --reason --body` `rec supersede ID --by ID` `rec merge IDs --into ID` `rec retire ID` `rec list [--all]` `rec show ID` `rec emit` |
 | research | `figure <value>` `quarantine <fig…> --why` `hyp add\|verdict\|list` `prereg freeze <spec>\|check` |
 | ops | `secrets` (plus the ops lint gates) |
+| integrity | (no commands: it adds the app/docs/dir lint checks under `--only integrity`) |
 | agents | `wf new\|add\|list` `claim` `done` `claim-register` `post` `feed` |
 | kinds | `new <kind> [--link rel=ID] \| --batch F` `move <id,…> <state>` `set` `link`/`unlink` `show <id,…>` `find <kind> --where` `view <name>` `impact <id> [--to S]` (preview a cascade) (all with `--json` where useful) |
 | blueprints | `init --blueprint N` `blueprint list\|show N [--playbook]\|new N [--from B]\|check [N]` |
