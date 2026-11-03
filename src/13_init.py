@@ -80,6 +80,22 @@ def cmd_init(args) -> None:
                                 ("package.json", "npm test"), ("go.mod", "go test ./...")) if (root / f).is_file()), "")
     write("genome.toml", genome_toml(mods, gate) + (f'\n[card]\nprivacy = "{bp_privacy(chain)}"\n' if bp_privacy(chain) else ""))
     write("AGENTS.md", agents_tpl(mods, gate))
+    # The readme role is mapped in every config genome.toml emits, but until 2026-11-03 no
+    # scaffold wrote it. Measured: `genome init` produced a tree whose genome.toml said
+    # `readme = "README.md"`, no README existed, and the first thing an operator did — add
+    # `[docs] required = ["README.md"]`, which the integrity module invites — was fail with
+    # E653 on a file the tool itself was supposed to create. A role that is declared and not
+    # filled is worse than one that is filled, so the scaffold now writes it. The stub is
+    # honest about being a stub, so W651 does not call it thin-and-toc-less on a repo with
+    # a README that is already long. `write` keeps an existing one, so this only ever adds.
+    # A module-scaffolded docs page IS linked, but only when its module wrote it: a
+    # README pointing at docs/OUTLINE.md on a `core`-only repo is a pointer at a file
+    # that does not exist, which is the same defect as a role nobody fills. Outward pages
+    # are the ones W009 watches, so this is the set that decides.
+    readme = README_TPL.replace("{{NAME}}", root.name)
+    if "outline" in mods:
+        readme += "\n- [docs/OUTLINE.md](docs/OUTLINE.md) — the architecture and the reading order\n"
+    write("README.md", readme)
     files = {
         "core": [("TODO.md", REGISTER_TPL), ("docs/handoff/README.md", ENTRY_TPL),
                  ("docs/handoff/STATE.md", STATE_TPL), ("docs/RUNBOOK.md", RUNBOOK_TPL),

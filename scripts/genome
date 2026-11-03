@@ -152,7 +152,7 @@ ERR = 2
 MIN_CHUNK = 5  # lines; `ask` hits narrower than this point at a lead line without its content
 HUB_NODE_CAP = 3000  # nodes; above this `graph hubs` ranks by degree and says betweenness was not computed
 _TMP_SEQ = itertools.count()  # makes each atomic_write temp name unique within this process too
-VERSION = "2026.11.02-60"
+VERSION = "2026.11.02-65"
 # every key genome reads: an unknown key is a typo that would silently switch a check off (E017)
 CONFIG_KEYS = {
     "genome": {"modules", "schema_version"},
@@ -2995,6 +2995,22 @@ def cmd_init(args) -> None:
                                 ("package.json", "npm test"), ("go.mod", "go test ./...")) if (root / f).is_file()), "")
     write("genome.toml", genome_toml(mods, gate) + (f'\n[card]\nprivacy = "{bp_privacy(chain)}"\n' if bp_privacy(chain) else ""))
     write("AGENTS.md", agents_tpl(mods, gate))
+    # The readme role is mapped in every config genome.toml emits, but until 2026-11-03 no
+    # scaffold wrote it. Measured: `genome init` produced a tree whose genome.toml said
+    # `readme = "README.md"`, no README existed, and the first thing an operator did — add
+    # `[docs] required = ["README.md"]`, which the integrity module invites — was fail with
+    # E653 on a file the tool itself was supposed to create. A role that is declared and not
+    # filled is worse than one that is filled, so the scaffold now writes it. The stub is
+    # honest about being a stub, so W651 does not call it thin-and-toc-less on a repo with
+    # a README that is already long. `write` keeps an existing one, so this only ever adds.
+    # A module-scaffolded docs page IS linked, but only when its module wrote it: a
+    # README pointing at docs/OUTLINE.md on a `core`-only repo is a pointer at a file
+    # that does not exist, which is the same defect as a role nobody fills. Outward pages
+    # are the ones W009 watches, so this is the set that decides.
+    readme = README_TPL.replace("{{NAME}}", root.name)
+    if "outline" in mods:
+        readme += "\n- [docs/OUTLINE.md](docs/OUTLINE.md) — the architecture and the reading order\n"
+    write("README.md", readme)
     files = {
         "core": [("TODO.md", REGISTER_TPL), ("docs/handoff/README.md", ENTRY_TPL),
                  ("docs/handoff/STATE.md", STATE_TPL), ("docs/RUNBOOK.md", RUNBOOK_TPL),
@@ -5004,6 +5020,30 @@ Status: LIVE (current truth) · EVIDENCE (dated measured verdict) · PLAN-ACTIVE
 
 | File | Status | Owns | Not for |
 |---|---|---|---|
+"""
+# The readme genome.toml maps as a role but no scaffold wrote until 2026-11-03. Kept short on
+# purpose: it is a door, and a door that is worth reading is the whole product. A real repo
+# replaces this in the first commit; what matters is that `[docs] required = ["README.md"]`
+# has a file to check on the day it is declared. AGENTS.md stays the agent-facing contract
+# and never links out to this one as though it were a substitute. Deliberately under any
+# plausible `[docs] max_lines`, so W651 ("long, no table of contents") cannot fire on it.
+# The docs pointer names the ENTRY page, which `core` always writes. Pages a module
+# scaffolds (`docs/OUTLINE.md`, the ops ownership map) are linked by `cmd_init` only when
+# that module is on, because a stub that links a file the config has not created is the
+# same defect the E653 half of this change repairs.
+README_TPL = """# {{NAME}}
+
+One paragraph: what this is and who it is for.
+
+## Install
+
+## Usage
+
+## The docs
+
+The documentation set lives in `docs/`, and its entry point is
+[docs/handoff/README.md](docs/handoff/README.md) — that page says which file answers which
+question, so it is the one to read before any other.
 """
 FEED_TPL = """# Agent feed
 

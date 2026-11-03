@@ -2375,6 +2375,29 @@ def integrity_module(base: Path) -> None:
     out = run(root, "lint", "--only", "integrity", "--all").stdout
     assert "E658" not in out and "W655" not in out, out
 
+    # ---- THE SCAFFOLD FILLS THE README IT MAPS ----
+    # The readme role is in every genome.toml this tool emits, and until 2026-11-03 no
+    # scaffold wrote it: `genome init` produced a tree that declared `readme =
+    # "README.md"` and held no README, so the first thing an operator did — declare
+    # `[docs] required = ["README.md"]`, which this module invites — was fail with E653
+    # against a file the tool itself was supposed to create. A declaration pointing at
+    # nothing is worse than no declaration: it reads as checked and is not. So the
+    # scaffold is asserted here, against the file the config maps rather than a
+    # hardcoded name, and against the stub being W651-safe.
+    fresh = base / "fresh"
+    fresh.mkdir()
+    run(fresh, "init")
+    cfg_text = (fresh / "genome.toml").read_text()
+    mapped = re.search(r'readme = "([^"]+)"', cfg_text).group(1)
+    assert (fresh / mapped).is_file(), f"init must fill the readme it maps: {mapped}"
+    stub = (fresh / mapped).read_text()
+    assert stub.strip(), "the readme scaffold must not be an empty file (E653: no content beyond its heading)"
+    assert len(stub.splitlines()) < 40, "the stub must stay under any plausible [docs] max_lines, so W651 cannot fire on it"
+    # and it must not clobber a real one: adoption fills gaps, it never rewrites
+    (fresh / mapped).write_text("# Real\n\nMine.\n")
+    run(fresh, "init")
+    assert (fresh / mapped).read_text() == "# Real\n\nMine.\n", "init must keep an existing readme word for word"
+
 
 @case
 def redteam6(base: Path) -> None:

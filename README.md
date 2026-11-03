@@ -195,7 +195,7 @@ Edit `src/`, rebuild with `python3 scripts/build.py`, verify with `python3 scrip
 
 Build the package with `uv build`; the wheel ships the same built file the repos vendor, so a pip-installed genome and a vendored genome are the same bytes. Publishing to PyPI is documented in [docs/PUBLISHING.md](docs/PUBLISHING.md): the build is verified and the name is free, but publication itself needs an API token and is deliberately an operator step — until it runs, use the installer above, which already falls back to the Git path.
 
-**Working on this repo (an agent, or a contributor)**: this repo runs its own genome, so [AGENTS.md](AGENTS.md) is the entry contract and [docs/RUNBOOK.md](docs/RUNBOOK.md) holds the exact commands. The suites that gate a change are `scripts/test_genome.py`, `scripts/test_package.py`, `scripts/test_package_modes.py` and `scripts/check_ps1.py` — the middle two install the built artifacts, so run `uv build` before them. The same chain is the pre-publish gate. `genome lint` is run as `python3 scripts/genome lint`, not `genome lint`.
+**Working on this repo (an agent, or a contributor)**: this repo runs its own genome, so [AGENTS.md](AGENTS.md) is the entry contract and [docs/RUNBOOK.md](docs/RUNBOOK.md) holds the exact commands. The module map — what each `src/NN_*.py` part owns, how the checks compose, and where to add a code — is [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). The suites that gate a change are `scripts/test_genome.py`, `scripts/test_package.py`, `scripts/test_package_modes.py` and `scripts/check_ps1.py` — the middle two install the built artifacts, so run `uv build` before them. The same chain is the pre-publish gate. `genome lint` is run as `python3 scripts/genome lint`, not `genome lint`.
 
 ## License
 

@@ -212,6 +212,30 @@ Status: LIVE (current truth) · EVIDENCE (dated measured verdict) · PLAN-ACTIVE
 | File | Status | Owns | Not for |
 |---|---|---|---|
 """
+# The readme genome.toml maps as a role but no scaffold wrote until 2026-11-03. Kept short on
+# purpose: it is a door, and a door that is worth reading is the whole product. A real repo
+# replaces this in the first commit; what matters is that `[docs] required = ["README.md"]`
+# has a file to check on the day it is declared. AGENTS.md stays the agent-facing contract
+# and never links out to this one as though it were a substitute. Deliberately under any
+# plausible `[docs] max_lines`, so W651 ("long, no table of contents") cannot fire on it.
+# The docs pointer names the ENTRY page, which `core` always writes. Pages a module
+# scaffolds (`docs/OUTLINE.md`, the ops ownership map) are linked by `cmd_init` only when
+# that module is on, because a stub that links a file the config has not created is the
+# same defect the E653 half of this change repairs.
+README_TPL = """# {{NAME}}
+
+One paragraph: what this is and who it is for.
+
+## Install
+
+## Usage
+
+## The docs
+
+The documentation set lives in `docs/`, and its entry point is
+[docs/handoff/README.md](docs/handoff/README.md) — that page says which file answers which
+question, so it is the one to read before any other.
+"""
 FEED_TPL = """# Agent feed
 
 Append-only. `genome post "msg" --wf <wf> --to <agent>`; `genome feed --to <you>`.

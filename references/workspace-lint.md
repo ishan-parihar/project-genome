@@ -36,6 +36,28 @@ the CLI stays **one stdlib-only file** so `copy-one-file` installability holds.
 A second linter that needs a dependency breaks the property the whole design
 rests on, for a job the stdlib one already does.
 
+## The two scripts that are better, not merely moved
+
+Re-verified 2026-11-03 with `cmp` against the originals at
+`~/.cache/jcode-scratch/baseline/`. Of `doc`'s seven scripts, five arrive byte-identical
+into `scripts/docs/`. Two do not, and the difference is worth stating precisely rather
+than calling the port a straight copy:
+
+- **`verify_install.sh`** — a `printf | grep -q` pipeline under `pipefail` is replaced by a
+  temp file, closing a SIGPIPE race; the hardening check becomes shebang-aware, so a
+  `/bin/sh` installer is asked for `set -eu` rather than a bashism it cannot carry; and
+  the arch-truth check is scoped to installers that actually download an arch-specific
+  artefact, instead of demanding `PROCESSOR_ARCHITECTURE` of an `npx` wrapper that has
+  no arch-sensitive step.
+- **`score_readme.py`** — `curated-list` is no longer classified by linked-entry count
+  alone. A 133-line doorway carrying an 11-item docs index was being read as a list, and
+  then judged against a 400-line floor for a list it was not. Entry count now has to be
+  joined by the absence of an install section and of code fences.
+
+Both are the same shape: the check was firing on trees that were fine. That is the class
+of defect this whole reference is about, so the two scripts that carry it are the two
+worth reading before anyone touches the checks they own.
+
 ## What to do instead
 
 1. `genome lint` — it reports every structural violation above, by code.
@@ -142,3 +164,28 @@ check that invented a toolchain for it would be noise rather than integrity.
 And the module earned its keep in the first week: E309 found
 `.genome/overrides/RECORDS_TPL.md` tracked while `.genome/` ignored it, a contradiction
 git tolerates and no previous gate could see.
+
+## The two defects this round of validation found in genome itself
+
+Worth writing down, because both are the shape the module exists to catch and neither was
+visible until the checks were pointed at the tool's own output.
+
+**`genome init` mapped a role it never filled.** Every `genome.toml` this tool emits
+declares `readme = "README.md"`, and until 2026-11-03 no scaffold wrote that file. A fresh
+`init` therefore produced a tree that asserted a document which did not exist, and the
+moment an operator added `[docs] required = ["README.md"]` — the first thing the integrity
+module invites — the lint answered `E653` against a file the tool had been supposed to
+create. The scaffold writes it now, short and honest about being a stub, and `redteam6`
+asserts it against the path the config maps rather than a hardcoded name.
+
+**The stub then exposed a real pre-existing W009.** Writing a README activates
+`lint_outward_pages`, which had been dormant on every fresh tree precisely because no
+README existed to link from. It immediately reported `docs/OUTLINE.md` unreachable — and
+the same finding against this repo's own `docs/ARCHITECTURE.md`, which had been failing
+all along without anything to notice. So the scaffold's docs pointer names the entry page
+`core` always writes, the module-scaffolded pages are linked by `cmd_init` only when their
+module is on, and this repo's README finally links its architecture.
+
+The generalisation, which is the one worth keeping: **a check that cannot run on the tool's
+own scaffolding is a check nobody has seen pass.** Both defects were hidden by a tree that
+was too empty to be judged.
