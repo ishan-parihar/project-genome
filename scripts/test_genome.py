@@ -2427,6 +2427,54 @@ def redteam6(base: Path) -> None:
     integrity_module(base)
 
 
+@case
+def redteam7(base: Path) -> None:
+    """A `--code` filter that matches nothing is reported, not swallowed.
+
+    Measured 2026-11-03: this repo's own `core.gate` carried `E601 E603 E604 E605 E606
+    E607 E608` after the integrity module took the E65x range, and every one of those
+    codes matched NOTHING. The gate looked green while checking eight conditions that no
+    longer existed, and nothing in the tool could see it — the filter was a set
+    intersection with no test that the left side still held anything.
+
+    A typo'd or retired code makes a gate weaker in silence, which is the one failure a
+    gate must not have. The test is unfiltered-relative rather than against a hardcoded
+    registry: a registry would itself drift, and "this filter matched nothing while
+    findings exist" is the fact that matters.
+    """
+    root = base / "codefilter"
+    root.mkdir()
+    new_repo(root)
+    run(root, "init")
+    base_toml = (root / "genome.toml").read_text().replace('modules = ["core"]',
+                                                            'modules = ["core", "integrity"]', 1)
+
+    def with_app(build: str) -> None:
+        """One `[app]` section per write, so TOML never sees a duplicate table."""
+        (root / "genome.toml").write_text(base_toml + f'\n[app]\ntoolchain = "python"\nbuild = "{build}"\n')
+
+    with_app("false")
+
+    # a filter that matches something: no note, and the finding survives
+    out = run(root, "lint", "--only", "integrity", "--code", "E651", "--all", ok=False).stdout
+    assert "E651 [app] build" in out, out
+    assert "matched no finding" not in out, out
+
+    # a filter that matches nothing, in a repo that DOES have findings: the note fires
+    out = run(root, "lint", "--only", "integrity", "--code", "E999", "--all").stdout
+    assert "matched no finding" in out, out
+    # the note must not name the code it failed to match: a code in the note's own text is
+    # matched by the filter that found nothing, so `--code E015` would "find" E015 in it
+    assert "E999" not in out, f"the note names no code, or the filter matches its own note: {out}"
+    assert "E651" not in out, f"the filter must still apply: {out}"
+
+    # a genuinely clean tree is NOT nagged about: matches nothing AND nothing to match
+    with_app("true")
+    out = run(root, "lint", "--only", "integrity", "--code", "E999", "--all").stdout
+    assert "matched no finding" not in out, f"a clean repo must not be told its filter was wrong: {out}"
+    assert "lint: clean" in out, out
+
+
 
 
 def main() -> None:

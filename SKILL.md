@@ -163,6 +163,10 @@ commit stays deliberate and uses named paths. It exits 2 on any of:
 Lint prints at most 5 lines per code, with a count of the rest, because the output is read by agents. Every code
 and its fix is in `references/lint-rules.md`.
 
+A `--code` filter that matches nothing prints one note, because a typo'd or retired code in a gate makes the gate
+weaker in silence — the one failure a gate must not have. This repo's own `core.gate` carried eight stale codes
+that way until the note existed to catch them.
+
 Questions about the tree's own shape — "organize files", "clean up directory", "where should I put
 this", "orphaned files at the root", "stray build artifacts" — are this module's class, and the
 absorbed `workspace-lint` skill lives at `references/workspace-lint.md`: its `workspace-lint.yaml`
