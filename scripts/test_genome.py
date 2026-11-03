@@ -2398,6 +2398,29 @@ def integrity_module(base: Path) -> None:
     run(fresh, "init")
     assert (fresh / mapped).read_text() == "# Real\n\nMine.\n", "init must keep an existing readme word for word"
 
+    # ---- TOOLCHAIN INFERENCE ACROSS LANGUAGES ----
+    # The module's whole premise is that "does this still build" is one question answered
+    # the same way in every language. Inference is the half nobody can see break, because
+    # a manifest it misses reads as a repo with no build, which is a legitimate answer —
+    # so the failure mode is SILENCE, not an error. Measured 2026-11-03: a multi-module
+    # Gradle project carries settings.gradle(.kts) and may have NO root build script, and
+    # the build-file-only manifest list left it unrecognised. One repo per manifest, each
+    # asserted to name its toolchain rather than to build.
+    for manifest, kind in (("Cargo.toml", "rust"), ("go.mod", "go"), ("tsconfig.json", "typescript"),
+                          ("package.json", "node"), ("pyproject.toml", "python"),
+                          ("pom.xml", "java"), ("build.gradle", "java"),
+                          ("settings.gradle", "java"), ("settings.gradle.kts", "java")):
+        d = base / f"lang-{manifest.replace('.', '_')}"
+        d.mkdir()
+        (d / manifest).write_text("{}\n" if manifest != "go.mod" else "module x\n\ngo 1.21\n")
+        run(d, "init")
+        t2 = (d / "genome.toml").read_text().replace('modules = ["core"]',
+                                                      'modules = ["core", "integrity"]', 1)
+        (d / "genome.toml").write_text(t2)
+        out = run(d, "lint", "--only", "integrity", "--all").stdout
+        assert f"toolchain {kind}" in out, f"{manifest} must infer {kind}: {out}"
+        assert "0 error(s)" in out, f"inference is a fact, never a finding: {out}"
+
 
 @case
 def redteam6(base: Path) -> None:

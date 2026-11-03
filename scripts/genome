@@ -152,7 +152,7 @@ ERR = 2
 MIN_CHUNK = 5  # lines; `ask` hits narrower than this point at a lead line without its content
 HUB_NODE_CAP = 3000  # nodes; above this `graph hubs` ranks by degree and says betweenness was not computed
 _TMP_SEQ = itertools.count()  # makes each atomic_write temp name unique within this process too
-VERSION = "2026.11.02-65"
+VERSION = "2026.11.02-68"
 # every key genome reads: an unknown key is a typo that would silently switch a check off (E017)
 CONFIG_KEYS = {
     "genome": {"modules", "schema_version"},
@@ -2113,9 +2113,21 @@ APP_KINDS = {
     "go": {"manifest": ["go.mod"], "probe": ["go", "version"],
            "build": "go build ./...", "test": "go test ./...", "lint": "go vet ./...",
            "fmt": "test -z \"$(gofmt -l .)\""},
-    "java": {"manifest": ["pom.xml", "build.gradle", "build.gradle.kts"],
+    "java": {"manifest": ["pom.xml", "build.gradle", "build.gradle.kts", "settings.gradle", "settings.gradle.kts"],
+             # settings.gradle(.kts) as well as build.gradle: a multi-module Gradle project
+             # declares its modules in settings and can carry NO root build script at all, so
+             # the build-file-only list left exactly the shape a large project takes
+             # unrecognised. Measured 2026-11-03 — a repo with settings.gradle + src/
+             # inferred no toolchain and answered "clean", which is the silence that reads as
+             # a green build.
+             #
+             # The default build prefers the WRAPPER (`./gradlew`) over a system `gradle` or
+             # `mvn`: it pins the toolchain version, which is why a repo vendors one, and a
+             # wrapper-less Gradle project is unusual enough that `./gradlew` failing is a
+             # fact worth an E651 rather than a silent fallback. So the Maven command is the
+             # default `test` only, not `build`, and a repo choosing either writes `[app]`.
              "probe": ["java", "-version"],
-             "build": "mvn -q compile", "test": "mvn -q test"},
+             "build": "./gradlew build -x test", "test": "mvn -q test"},
     "shell": {"manifest": [], "probe": ["bash", "--version"], "lint": "bash -n"},
 }
 

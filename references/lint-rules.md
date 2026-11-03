@@ -124,6 +124,38 @@ repo states its own integrity law rather than inheriting a linter's opinion.
 | E658 | an install script is not executable | `chmod +x` it |
 | W655 | an install script names no verification step | add a `verify` / `--version` probe |
 
+### Which toolchain, and how it is found
+
+`app.toolchain` names one directly and wins outright — a Rust workspace with a bundled JS
+tool is a Rust project. With no declaration the manifest decides, and only one manifest
+may match: two is a monorepo the operator classifies, because guessing here would run the
+wrong toolchain's checks and report a clean build for a repo that was never compiled.
+
+| Toolchain | Manifest | Probe | Default `build` |
+|---|---|---|---|
+| rust | `Cargo.toml` | `cargo --version` | `cargo build --workspace --locked` |
+| go | `go.mod` | `go version` | `go build ./...` |
+| java | `pom.xml`, `build.gradle(.kts)`, `settings.gradle(.kts)` | `java -version` | `./gradlew build -x test` |
+| typescript | `tsconfig.json` | `node --version` | `npx tsc --noEmit` |
+| node | `package.json` | `node --version` | `npm run build` |
+| python | `pyproject.toml`, `setup.py`, `setup.cfg`, `requirements.txt` | `python3 --version` | `python3 -m compileall -q .` |
+
+Two of those manifest lists earned their shape the hard way. `settings.gradle(.kts)` is
+in java's because a multi-module Gradle project declares its modules there and may carry
+NO root build script, and the build-file-only list left it reading as a repo with no build
+— the silence that looks like a green build. And `tsconfig.json` probes `node`, never
+`npx tsc`: with no `node_modules`, npx resolves the name from the registry, prints "This
+is not the tsc command you are looking for" and exits 0, so a TypeScript repo whose `tsc`
+is simply absent probes as a healthy toolchain.
+
+Java's default build prefers the vendored `./gradlew` over a system `gradle`: the wrapper
+pins the toolchain version, which is why a repo vendors it. A Maven project writes its own
+`[app] build` — or leaves the field off and declares nothing, which is a legitimate answer
+for a repo whose build is CI's business.
+
+`redteam6` asserts one repo per manifest, so a manifest that stops being recognised fails
+the suite instead of quietly reading as "no build".
+
 A genome ROLE directory is exempt from E656: `genome init` creates those empty and they
 fill as the work happens, so its emptiness is a project's lifecycle, not a defect.
 
