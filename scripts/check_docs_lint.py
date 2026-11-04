@@ -206,18 +206,63 @@ def docs_check_propagates_a_failing_check(root: Path) -> None:
     to print "docs-check: clean" and exit 0. A dead link, an orphan page and
     a W008/W009 warning ALL failed the gate in appearance only.
 
-    The fix is inside `run`, not at the call sites, so this test pins the
+    THE FIX IS IN `run`, not at the call sites, so this test pins the
     BEHAVIOUR (the exit code) rather than the implementation.
+
+    THE README MUST PASS ITS OWN RUBRIC, and that is the whole point of this
+    case. A first version of it used a three-line README, which the rubric
+    fails — so the rubric's `|| rc=2` set the exit code and the test passed
+    even with the fix reverted. The test proved nothing. Mutation testing
+    caught it: reverting the fix left the test GREEN.
+
+    So the README here is built to satisfy the rubric on its own (100-170
+    lines, three images, two code blocks, one table), which leaves the
+    boundary check as the ONLY failing check. That is the case where the
+    propagation is load-bearing.
     """
     r = root / "gate"
     r.mkdir()
     new_repo(r)
-    make(r, {"README.md": "# Title\n\nSee [gone](docs/GONE.md).\n"})
+    # a dead link: the outward boundary is the only check that can fail
+    (r / "README.md").write_text(_rubric_readme() + "\nSee [gone](docs/GONE.md).\n")
     res = run(r, "bash", str(CHECK), "--all", ok=False)
+    assert "FAIL: outward boundary" in res.stdout, res.stdout
     assert res.returncode != 0, f"a failing check did not fail the gate:\n{res.stdout}"
-    assert "FAIL:" in res.stdout, res.stdout
     assert "docs-check: FAILED" in res.stdout, res.stdout
     assert "docs-check: clean" not in res.stdout, f"the gate said clean and failed:\n{res.stdout}"
+
+
+def _rubric_readme() -> str:
+    """A README that PASSES score_readme.py's generic archetype on its own.
+
+    The rubric wants 100-170 lines, three images, two code blocks and one
+    table. A failing README would set the script's exit code by itself and
+    hide whether the boundary check's failure propagates — which is exactly
+    what happened to the first version of this test.
+    """
+    lines = ["# A Real Project", "",
+             "A knowledge base that keeps decisions, regressions and worklogs honest across sessions.",
+             "It turns a repository into a knowledge base with named roles, each with an owner and a",
+             "mutability class, so agents can work in it over many sessions without re-explaining.",
+             "", "## What it does", "",
+             "| role | owner | mutability |", "|---|---|---|",
+             "| decisions | the chair | frozen once ratified |",
+             "| regressions | the operator | appendable |",
+             "| worklog | every agent | rolling |",
+             "", "## Why it exists", "",
+             "Because a timeline is not evidence. The records index records what bit us and why.",
+             "", "## Install", "", "```bash", "genome init --profile software", "genome wake", "```", "",
+             "## Use", "", "```bash", "genome lint --all", "genome close --message 'what changed'", "```", ""]
+    i = 0
+    while len(lines) < 104:
+        lines.append(f"### Detail {i + 1}")
+        lines.append("")
+        lines.append("A short paragraph explaining one facet of the design and the constraint behind it.")
+        lines.append("")
+        i += 1
+    text = "\n".join(lines) + "\n## Gallery\n\n"
+    text += "\n\n".join(f"![diagram {n}](img/{n}.png)" for n in range(1, 4)) + "\n"
+    return text
 
 
 @case
