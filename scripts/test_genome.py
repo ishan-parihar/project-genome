@@ -2474,6 +2474,37 @@ def redteam7(base: Path) -> None:
     assert "matched no finding" not in out, f"a clean repo must not be told its filter was wrong: {out}"
     assert "lint: clean" in out, out
 
+    # JSON stdout is a CONTRACT: it must parse as ONE document even when the filter hid
+    # something. Measured 2026-11-04 — the note printed to stdout ahead of the document,
+    # so `lint --json --code <dead>` emitted two lines and every consumer's json.loads()
+    # raised. The --code tests above only ever read stdout in TEXT form, and the --json
+    # test only ever ran without a filter, so the combination was uncovered.
+    with_app("false")
+    import json as _json
+    res = run(root, "lint", "--only", "integrity", "--code", "E999", "--all", "--json")
+    doc = _json.loads(res.stdout)   # raises if stdout is not exactly one JSON document
+    assert doc["findings"] == [], doc
+    assert doc["errors"] == 0, doc
+    # the hidden counts travel INSIDE the document: a consumer reading an empty findings
+    # list must still be able to see that the filter hid a live error
+    assert doc.get("hidden") == {"errors": 1, "warnings": 0}, doc
+    # the note is still said — on stderr, where stdout belongs to the document alone
+    assert "matched no finding" in res.stderr, res.stderr
+
+    # a JSON run WITHOUT a filter carries no `hidden` key: absent, not zero, so a
+    # consumer can tell "nothing hidden" from "no filter in force". The tree holds a live
+    # error, so this run EXITS 2 — that is the gate doing its job, and the document is
+    # still the thing on stdout.
+    doc2 = _json.loads(run(root, "lint", "--only", "integrity", "--all", "--json", ok=False).stdout)
+    assert "hidden" not in doc2, doc2
+    assert doc2["errors"] == 1, doc2
+
+    # a JSON run whose filter MATCHES carries no `hidden` key either
+    doc3 = _json.loads(run(root, "lint", "--only", "integrity", "--code", "E651", "--all",
+                            "--json", ok=False).stdout)
+    assert "hidden" not in doc3, doc3
+    assert doc3["errors"] == 1 and len(doc3["findings"]) == 1, doc3
+
 
 
 
