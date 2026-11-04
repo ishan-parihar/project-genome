@@ -517,14 +517,27 @@ def main() -> int:
     # reads. A finding with no file (none today) is kept: dropping it would
     # be the fail-open direction.
     staged = None
+    staged_counts = None
     if args.staged:
         staged = staged_paths(root)
         if staged is not None:
             before = len(findings)
             findings = [f for f in findings
                         if f.get("file") is None or f.get("file") in staged]
-            print("docs_lint: staged scope: {} of {} finding(s) are in staged files"
-                  .format(len(findings), before))
+            staged_counts = {"kept": len(findings), "before": before}
+            # THE NOTE MUST NOT POLLUTE THE JSON STREAM. `--json` is a contract:
+            # stdout is ONE document, and a consumer's json.loads(stdout) must
+            # not raise. Measured 2026-11-04: the note printed to stdout ahead
+            # of the document, so `--json --staged` emitted two things and every
+            # consumer broke on the first line. This is the same defect the
+            # kernel's own `lint --json` had, and the same fix: in JSON mode
+            # the note goes to stderr and the counts travel INSIDE the document.
+            if args.json:
+                print("docs_lint: staged scope: {} of {} finding(s) are in staged files"
+                      .format(len(findings), before), file=sys.stderr)
+            else:
+                print("docs_lint: staged scope: {} of {} finding(s) are in staged files"
+                      .format(len(findings), before))
         # else: git could not be asked. Keep every finding rather than
         # silently passing: the gate must fail CLOSED when it cannot tell
         # what is staged.
@@ -538,7 +551,7 @@ def main() -> int:
         for f in findings:
             sev = "hard" if (f["severity"] == "hard" or args.strict) else "advisory"
             serialised.append({**f, "severity": sev})
-        print(json.dumps({
+        doc = {
             "root": str(root),
             "readme": rel(readme_path, root),
             "docs_dir": rel(docs_dir, root) if docs_dir.is_dir() else str(docs_dir),
@@ -549,7 +562,14 @@ def main() -> int:
                 "hard_total": hard_count,
             },
             "exit_code": 0 if hard_count == 0 else 2,
-        }, indent=2))
+        }
+        # The scope travels with the document: a consumer that reads the JSON
+        # can see how many findings the scope dropped. Absent when there was no
+        # scope, rather than zero, so "not scoped" and "scoped, dropped none"
+        # are different facts.
+        if staged_counts is not None:
+            doc["staged"] = staged_counts
+        print(json.dumps(doc, indent=2))
         return 0 if hard_count == 0 else 2
 
     # text output

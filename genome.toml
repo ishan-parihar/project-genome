@@ -22,7 +22,7 @@ regressions = "docs/regressions"
 records_index = "docs/RECORDS.md"
 
 [core]
-gate = "uv build --wheel --sdist >/dev/null && python3 scripts/test_genome.py && python3 scripts/test_package.py && python3 scripts/test_package_modes.py && python3 scripts/build.py --check && python3 scripts/check_ps1.py && python3 scripts/genome lint --code E306 E308 E309 E651 E653 E654 E655 E656 E657 E658 --all"
+gate = "uv build --wheel --sdist >/dev/null && python3 scripts/test_genome.py && python3 scripts/test_package.py && python3 scripts/test_package_modes.py && python3 scripts/check_docs_lint.py && python3 scripts/build.py --check && python3 scripts/check_ps1.py && python3 scripts/genome lint --code E306 E308 E309 E651 E653 E654 E655 E656 E657 E658 --all"
 # The gate `genome close` runs. Suite-only on purpose: it must pass in a few minutes and need
 # nothing but the stdlib, so it runs before every push. The structure checks (E306 layout,
 # E308 a directory name, E309 tracked-and-ignored) are gated too, because a misplaced file

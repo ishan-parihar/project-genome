@@ -62,19 +62,21 @@ derived structural zone gated against drift). A small app needs `core`; the rest
 ## Gate
 
 ```
-python3 scripts/test_genome.py     # 38/38 suites: the CLI, against a scratch copy
+python3 scripts/test_genome.py     # 44/44 suites: the CLI, against a scratch copy
 ```
 
 The `[core] gate` here is `pytest -q`, but **`pytest` has nothing to collect** — the
-tests are the three self-check scripts, and the one that gates a release is
+tests are the self-check scripts, and the one that gates a release is
 `scripts/test_package.py`, which installs the actual wheel and asserts byte parity with
 the vendored `scripts/genome`.
 
 | suite | what it proves | last measured |
 |---|---|---|
-| `scripts/test_genome.py` | 38/38 cases: the CLI against a scratch copy, never your project | 2026-10-30 |
-| `scripts/test_package.py` | 8/8: the wheel installs, the console script and `-m` both run, byte parity | 2026-10-30 |
-| `scripts/test_package_modes.py` | 5/5: the sdist path, the whole command surface in installed mode, the exit codes a CI job chains on, and the Python floor | 2026-10-30 |
+| `scripts/test_genome.py` | 44/44 cases: the CLI against a scratch copy, never your project | 2026-11-04 |
+| `scripts/test_package.py` | 8/8: the wheel installs, the console script and `-m` both run, byte parity | 2026-11-04 |
+| `scripts/test_package_modes.py` | 5/5: the sdist path, the whole command surface in installed mode, the exit codes a CI job chains on, and the Python floor | 2026-11-04 |
+| `scripts/check_docs_lint.py` | 11/11: the docs gate — a failing check fails the gate, `--staged` reports on the commit, `--json` stdout is one document | 2026-11-04 |
+| `scripts/check_ps1.py` | the Windows installer's structure balances and its guards match `install.sh` | 2026-11-04 |
 
 ## Routing table — which document answers what
 
