@@ -157,6 +157,64 @@ def numbered_worklog(root: Path) -> None:
 
 
 @case
+def log_body_is_written(root: Path) -> None:
+    """`genome log --body-file` writes the body, in BOTH worklog forms.
+
+    The append form dropped the body: it wrote only the headline line, so
+    every entry logged with --body-file in a single-file-worklog repo was
+    silently truncated to its title. The worklog is the resume surface, so
+    that is a lost-work surface. This case fails on the old code.
+    """
+    full_repo(root)
+    body = "The body says a thing the headline does not: 42 and 43."
+    (root / "body.md").write_text(body)
+
+    # --- the append form (worklog_form = "file") ---
+    run(root, "log", "APPEND ENTRY", "--body-file", "body.md")
+    text = (root / "docs/kb/WORKLOG.md").read_text()
+    assert "APPEND ENTRY" in text, text
+    assert body in text, "the body was dropped by the append form"
+
+    # --- the numbered form (worklog_form = "numbered") ---
+    toml = (root / "genome.toml").read_text().replace('worklog_form = "file"', 'worklog_form = "numbered"')
+    toml = toml.replace('worklog = "docs/kb/WORKLOG.md"', 'worklog = "docs/worklog"')
+    (root / "genome.toml").write_text(toml)
+    (root / "docs/worklog").mkdir()
+    run(root, "log", "NUMBERED ENTRY", "--body-file", "body.md")
+    numbered = "\n".join(p.read_text() for p in (root / "docs/worklog").glob("*.md"))
+    assert "NUMBERED ENTRY" in numbered, numbered
+    assert body in numbered, "the body was dropped by the numbered form"
+
+    # --- each form keeps its own shape, and neither drops the body ---
+    # The numbered form writes a PAGE, so a multi-line body stays multi-line:
+    # a page has room for paragraphs. The append form writes ONE LINE per
+    # entry, so its body is flattened. What must hold for both is that the
+    # body is PRESENT and that the append form stays one entry.
+    (root / "docs/worklog2").mkdir()
+    (root / "multi.md").write_text("line one of the body\n\nline two of the body\n")
+    toml2 = (root / "genome.toml").read_text().replace('worklog = "docs/worklog"', 'worklog = "docs/worklog2"')
+    (root / "genome.toml").write_text(toml2)
+    run(root, "log", "MULTILINE ENTRY", "--body-file", "multi.md")
+    files = [p for p in (root / "docs/worklog2").glob("*.md") if p.name != "INDEX.md"]
+    assert len(files) == 1, files
+    page = files[0].read_text()
+    assert "line one of the body" in page and "line two of the body" in page, page
+
+    # --- and the file form's entry count grows by exactly ONE ---
+    toml3 = toml2.replace('worklog = "docs/worklog2"', 'worklog = "docs/kb/WORKLOG.md"').replace('worklog_form = "numbered"', 'worklog_form = "file"')
+    (root / "genome.toml").write_text(toml3)
+    before = (root / "docs/kb/WORKLOG.md").read_text().count("- **")
+    run(root, "log", "COUNTED ENTRY", "--body-file", "multi.md")
+    text = (root / "docs/kb/WORKLOG.md").read_text()
+    after = text.count("- **")
+    assert after == before + 1, (before, after)
+    # the flattened body is on that ONE line, not spread over several
+    line = [l for l in text.splitlines() if "COUNTED ENTRY" in l]
+    assert len(line) == 1, line
+    assert "line one of the body line two of the body" in line[0], line[0]
+
+
+@case
 def legacy_kb_toml(root: Path) -> None:
     """a legacy kb.toml is read unchanged"""
     leg = root / "legacy"
@@ -1527,7 +1585,15 @@ def kb_registry(root: Path) -> None:
     # the version column is on every row, which is what makes the list answer
     # "which are behind" in the same glance as "where are they"
     kbl = run(root, "kb", "list", env=env)
-    assert f"{prev}  behind {cur}" in kbl.stdout, f"kb list must show the version and the gap: {kbl.stdout}"
+    # The version column is padded to a fixed width, so the gap between the
+    # version and the word "behind" is whatever the padding leaves. Asserting
+    # a literal run of spaces ties the test to the CURRENT version string's
+    # LENGTH: the old "2026.11.02-75" is 13 chars and left 2, while a
+    # 12-char "2026.11.05-1" leaves 3. The test failed on a version bump
+    # that changed nothing about the behaviour it claims to check, so the
+    # assertion now matches the version and the word, not the padding.
+    assert re.search(rf"{re.escape(prev)}\s+behind\s+{re.escape(cur)}", kbl.stdout), \
+        f"kb list must show the version and the gap: {kbl.stdout}"
     # restore it: the dispatch's target assertion below needs a copy that is NOT behind
     kb_bin.joinpath("bin", "genome").write_text(Path(G).read_text())
     run(root, "installs", "register", "kb", str(kb_bin), env=env)

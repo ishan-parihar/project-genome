@@ -121,9 +121,25 @@ def cmd_log(args) -> None:
         return
     with Guarded(wl):
         wl.parent.mkdir(parents=True, exist_ok=True)
+        # The body belongs to the entry line. It used to be DROPPED here: the
+        # numbered branch wrote args.body, this branch wrote only the headline,
+        # so `genome log "TITLE" --body-file body.md` silently truncated the
+        # entry to its title in every repo whose worklog is a single file (71
+        # of the 75 in this fleet). The worklog is the surface a later session
+        # resumes from, so a headline with no body is a lost-work surface of
+        # exactly the kind this repo's rules exist to prevent.
+        #
+        # One entry is one physical line in this file, so a multi-line body is
+        # flattened: every run of whitespace becomes one space. That keeps the
+        # markdown readable without introducing a second entry marker, and it
+        # is lossless for the prose this worklog holds.
+        body = " ".join(args.body.split()) if args.body else ""
+        line = f"- **{now()}**{sig} — {args.entry}"
+        if body:
+            line += " " + body
         with open(wl, "a") as f:
-            f.write(f"- **{now()}**{sig} — {args.entry}\n")
-    print(f"worklog: appended ({cfg.rel(wl)})")
+            f.write(line + "\n")
+    print(f"worklog: appended ({cfg.rel(wl)})" + (f" ({len(args.body)} chars of body)" if args.body else ""))
 
 
 def cmd_handoff(args) -> None:
