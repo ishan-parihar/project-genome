@@ -12,6 +12,7 @@ Every selected case runs even when one fails; the summary lists them all and the
 exit code is 1 on any failure.
 """
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -197,6 +198,68 @@ def stale_installed_copy_is_never_reported_current_silently():
 
 
 # ── exit codes a CI job chains on ────────────────────────────────────────────
+
+
+@case
+def installer_local_source_installs_the_local_checkout():
+    """`--from-local <path>` installs THAT checkout's kernel, and refuses what it cannot honour.
+
+    The gap this closes, measured 2026-11-05: `--from-github` is documented as
+    "the path for unreleased builds", but it fetches the REMOTE, so a developer
+    with an unpushed fix had no sanctioned way to refresh their own PATH binary
+    — the only route was a publish. The PATH `genome` sat at 2026.11.02-75
+    while the local checkout held 2026.11.05-3.
+
+    This case proves the route end to end in a sandbox: the installed binary's
+    version is the LOCAL checkout's, not the remote's and not the wheel's.
+    """
+    if not shutil.which("uv"):
+        return  # uv is the rung under test; without it there is nothing to assert
+    home = Path(tempfile.mkdtemp(prefix="genome-local-")) / "home"
+    home.mkdir(parents=True)
+    # An isolated uv tool dir, so the sandbox cannot touch the real install.
+    tool_dir = home.parent / "uvtool"
+    tool_dir.mkdir()
+    # A LOCAL checkout with a VERSION the remote does not have. The remote's
+    # published state is what the route must NOT install.
+    # Copy the tree rather than the pieces the CI images list, because pyproject.toml
+    # declares files a build needs (LICENSE, README.md) — a fixture that omits them
+    # fails at the BUILD and reports a packaging error that says nothing about the
+    # route under test. The first draft of this case did exactly that and the test
+    # caught the fixture, not the installer.
+    local = home.parent / "checkout"
+    ignore = shutil.ignore_patterns("dist", "__pycache__", ".git", "*.egg-info")
+    shutil.copytree(ROOT, local, ignore=ignore)
+    pat = (local / "src" / "01_constants.py").read_text()
+    local_v = re.search(r'^VERSION = "([^"]+)"', pat, re.M)
+    assert local_v, "the fixture checkout has no VERSION to overwrite"
+    (local / "src" / "01_constants.py").write_text(
+        pat.replace(local_v.group(0), 'VERSION = "2099.01.01-1"'))
+    out = run(["bash", str(ROOT / "install.sh"), "--from-local", str(local), "--no-cta"],
+              env=dict(os.environ, HOME=str(home),
+                       XDG_DATA_HOME=str(home / "data"),
+                       UV_TOOL_DIR=str(tool_dir),
+                       UV_TOOL_BIN_DIR=str(home / "bin")),
+              cwd=str(home))
+    both = out.stdout + out.stderr
+    assert out.returncode == 0, f"the local install failed: {both[-600:]}"
+    exe = home / "bin" / "genome"
+    assert exe.exists() or (tool_dir / "bin" / "genome").exists(), \
+        f"no binary was installed: {both[-600:]}"
+    exe = next((p for p in (home / "bin" / "genome", tool_dir / "bin" / "genome") if p.exists()), exe)
+    v = run([str(exe), "--version"]).stdout.strip()
+    assert "2099.01.01-1" in v, f"the installed binary is not the LOCAL checkout's: {v}"
+
+    # --- and it refuses a path that is not a checkout, rather than installing something else ---
+    empty = home.parent / "notacheckout"
+    empty.mkdir()
+    bad = run(["bash", str(ROOT / "install.sh"), "--from-local", str(empty), "--no-cta"],
+              env=dict(os.environ, HOME=str(home), XDG_DATA_HOME=str(home / "data"),
+                       UV_TOOL_DIR=str(tool_dir), UV_TOOL_BIN_DIR=str(home / "bin")),
+              cwd=str(home))
+    assert bad.returncode != 0, f"a non-checkout path was accepted: {bad.stdout[-300:]}"
+    assert "pyproject.toml" in (bad.stdout + bad.stderr), \
+        f"the refusal did not say why: {(bad.stdout + bad.stderr)[-300:]}"
 
 
 @case

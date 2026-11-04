@@ -19,6 +19,10 @@
 #   --skill        also install the skill bundle into every detected harness
 #   --dir <path>   extra skills root (repeatable) for --skill
 #   --from-github  install the CLI from the Git repo instead of PyPI (unreleased builds)
+#   --from-local <path>  install the CLI from a LOCAL project-genome checkout
+#                     instead of PyPI or Git — the route for an unreleased fix that
+#                     has not been pushed yet. The checkout is built first, so the
+#                     installed kernel is the checkout's, not a stale artifact.
 #   --with-worktrunk  also install the worktrunk CLI (`wt`) via the machine's package
 #                     manager — optional, off by default (SKIP_WORKTRUNK=1 overrides)
 #   --no-cta       skip the star/donate epilogue (also: SKIP_CTA=1)
@@ -65,6 +69,7 @@ SKIP_SKILL=1
 FROM_GITHUB=0
 COPY_SKILL=0
 SKIP_WT=1
+FROM_LOCAL=""
 EXTRA_DIRS=()
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -72,13 +77,45 @@ while [ $# -gt 0 ]; do
     --dir)         EXTRA_DIRS+=("$2"); shift 2 ;;
     --copy-skill)  COPY_SKILL=1; shift ;;
     --from-github) FROM_GITHUB=1; shift ;;
+    --from-local)  FROM_LOCAL="${2:?--from-local needs a path: a project-genome checkout with a built scripts/genome}"; shift 2 ;;
     --with-worktrunk) SKIP_WT=0; shift ;;
     --no-cta)      SKIP_CTA=1; shift ;;
     --force-root)  FORCE_ROOT=1; shift ;;
     --help|-h)     sed -n '2,30p' "$0"; exit 0 ;;
-    *) die "Unknown option: $1 (supported: --skill, --dir <path>, --copy-skill, --from-github, --with-worktrunk, --no-cta, --force-root)" ;;
+    *) die "Unknown option: $1 (supported: --skill, --dir <path>, --copy-skill, --from-github, --from-local <path>, --with-worktrunk, --no-cta, --force-root)" ;;
   esac
 done
+
+# The SOURCE the CLI is installed from, and the label that says so. One place,
+# so the install sites below cannot disagree about what they are installing.
+#
+# `--from-local` exists because `--from-github` fetches the REMOTE, and a
+# developer with an unreleased fix in a local checkout had no sanctioned way to
+# refresh their own PATH binary: the flag that looks like it should do that
+# (`--from-github` is documented as "the path for unreleased builds") installs
+# the published state instead of the local one. Measured 2026-11-05: the PATH
+# `genome` sat at 2026.11.02-75 while the local checkout held 2026.11.05-3,
+# and the only route that would have fixed it was a publish. A local source
+# fixes that without a publish and without touching the published artefact.
+SRC=""
+SRC_LABEL=""
+if [ -n "$FROM_LOCAL" ]; then
+  FROM_LOCAL="$(cd "$FROM_LOCAL" 2>/dev/null && pwd || true)"
+  [ -n "$FROM_LOCAL" ] || die "--from-local path does not exist"
+  [ -f "$FROM_LOCAL/pyproject.toml" ] || die "--from-local path is not a project-genome checkout (no pyproject.toml): $FROM_LOCAL"
+  # The wheel force-includes scripts/genome as _genome.py, so a checkout whose
+  # build is stale would install the STALE kernel. Build it here rather than
+  # letting the install silently carry whatever bytes were on disk.
+  if [ -f "$FROM_LOCAL/scripts/build.py" ]; then
+    ( cd "$FROM_LOCAL" && python3 scripts/build.py ) || die "--from-local could not build $FROM_LOCAL (run scripts/build.py there and read its error)"
+  fi
+  SRC="$FROM_LOCAL"
+  SRC_LABEL="from the local checkout"
+elif [ "$FROM_GITHUB" = "1" ]; then
+  command -v git >/dev/null 2>&1 || die "--from-github needs git — install git, or drop the flag to install from PyPI"
+  SRC="git+$REPO"
+  SRC_LABEL="from git"
+fi
 
 # The bundle is a separate explicit step rather than a surprise side effect of
 # the CLI install. Check the prerequisite HERE, at request time: a git-less host
@@ -167,17 +204,16 @@ try_pip_floor() {
 # of the script under `set -e` — a bare failing call here aborts the whole
 # installer before the CLI-unmet handler, observed with exactly that symptom
 # (the --skill bundle never ran and nothing said why).
-if [ "$FROM_GITHUB" = "1" ]; then
-  command -v git >/dev/null 2>&1 || die "--from-github needs git — install git, or drop the flag to install from PyPI"
-  info "installing from the Git repository (unreleased build)"
+if [ -n "$SRC" ]; then
+  info "installing $SRC_LABEL (unreleased build)"
   if command -v uv >/dev/null 2>&1; then
-    uv tool install --force --from "git+$REPO" "$PKG" && installed_with="uv (from git)"
+    uv tool install --force --from "$SRC" "$PKG" && installed_with="uv ($SRC_LABEL)"
     INSTALL_BIN_DIR="$(uv tool dir --bin 2>/dev/null || echo "$BIN_DIR")"
   elif command -v pipx >/dev/null 2>&1; then
-    pipx install --force "git+$REPO" && installed_with="pipx (from git)"
+    pipx install --force "$SRC" && installed_with="pipx ($SRC_LABEL)"
     INSTALL_BIN_DIR="$(pipx environment --value PIPX_BIN_DIR 2>/dev/null || echo "$BIN_DIR")"
   else
-    if ! try_pip_floor "git+$REPO" "from git"; then
+    if ! try_pip_floor "$SRC" "$SRC_LABEL"; then
       warn "the pip floor could not install it — see the errors above"
     fi
   fi
@@ -238,7 +274,20 @@ if [ -z "$installed_with" ]; then
     # operator to re-run with a flag (observed: the README one-liner exited 1 on a
     # machine where the from-git install succeeds in one step - the advice
     # repeated the failure instead of resolving it).
-    if command -v git >/dev/null 2>&1; then
+    # A LOCAL source, when one was named, is the better answer still: it is the
+    # state the developer is actually running, not the remote's.
+    if [ -n "$SRC" ]; then
+      warn "the package is not on PyPI yet — retrying $SRC_LABEL"
+      if command -v uv >/dev/null 2>&1; then
+        uv tool install --force --from "$SRC" "$PKG" && installed_with="uv ($SRC_LABEL)"
+        INSTALL_BIN_DIR="$(uv tool dir --bin 2>/dev/null || echo "$BIN_DIR")"
+      elif command -v pipx >/dev/null 2>&1; then
+        pipx install --force "$SRC" && installed_with="pipx ($SRC_LABEL)"
+        INSTALL_BIN_DIR="$(pipx environment --value PIPX_BIN_DIR 2>/dev/null || echo "$BIN_DIR")"
+      elif try_pip_floor "$SRC" "$SRC_LABEL"; then
+        installed_with="pip ($SRC_LABEL)"
+      fi
+    elif command -v git >/dev/null 2>&1; then
       warn "the package is not on PyPI yet — retrying from the Git repository"
       if command -v uv >/dev/null 2>&1; then
         uv tool install --force --from "git+$REPO" "$PKG" && installed_with="uv (from git)"
