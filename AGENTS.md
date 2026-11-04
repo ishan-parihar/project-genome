@@ -78,6 +78,18 @@ the vendored `scripts/genome`.
 | `scripts/check_docs_lint.py` | 11/11: the docs gate — a failing check fails the gate, `--staged` reports on the commit, `--json` stdout is one document | 2026-11-04 |
 | `scripts/check_ps1.py` | the Windows installer's structure balances and its guards match `install.sh` | 2026-11-04 |
 
+**One suite is deliberately NOT in the gate**: `scripts/mutation_check.py` reverts each fix
+to its pre-fix commit and asserts the covering test FAILS, so every fix is known to have a
+test that can catch it. It needs a throwaway git worktree and takes about 90 seconds, which
+is too slow and too side-effecting for a gate that runs before every push. Run it on demand
+after changing a check or a fix:
+
+```
+python3 scripts/mutation_check.py    # 7/7 mutations caught; exit 0
+```
+
+It runs in its own worktree and proves the live checkout came through untouched.
+
 ## Routing table — which document answers what
 
 | question | answer lives in |
