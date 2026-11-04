@@ -18,11 +18,15 @@ Checks (code / severity):
 
 Exit codes: 0 = clean (advisories allowed), 2 = any hard failure.
 --strict promotes D002/D005 advisories to hard failures.
-Read-only; never writes. Stdlib only (argparse, json, re, sys, pathlib).
+--staged restricts the findings to the files git has staged, so a
+pre-commit hook reports on what the commit touched rather than on every
+defect the repository has ever accumulated. Read-only; never writes.
+Stdlib only (argparse, json, re, subprocess, sys, pathlib).
 """
 import argparse
 import json
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -34,6 +38,31 @@ REF_LINK_RE = re.compile(r"!\[([^\]]*)\]\[([^\]]*)\]|\[([^\]]*)\]\[([^\]]*)\]")
 REF_DEF_RE = re.compile(r"^\s*\[([^\]]+)\]:\s*(\S.*)$")
 HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*$")
 FENCE_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})")  # CommonMark: a fence may be indented up to 3 spaces
+
+
+def staged_paths(root):
+    """The repo-relative paths git has staged, as a set of strings.
+
+    Returns None when git cannot be asked (not a repo, git missing, git
+    failed). The caller must then treat the scope as UNKNOWN and keep every
+    finding -- a gate that cannot tell what is staged must not pass
+    silently.
+
+    The paths come from `git diff --cached --name-only`, which is the same
+    thing the commit is about. Deleted files are included by git; they are
+    dropped here because a finding about a file that no longer exists is
+    not actionable.
+    """
+    try:
+        out = subprocess.run(
+            ["git", "-C", str(root), "diff", "--cached", "--name-only",
+             "--diff-filter=d"],
+            capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if out.returncode != 0:
+        return None
+    return {line.strip() for line in out.stdout.splitlines() if line.strip()}
 
 
 def norm(s: str) -> str:
@@ -456,6 +485,8 @@ def main() -> int:
     ap.add_argument("--json", action="store_true", help="machine-readable output")
     ap.add_argument("--strict", action="store_true",
                     help="promote D002/D005 advisories to hard failures")
+    ap.add_argument("--staged", action="store_true",
+                    help="report only findings in files git has staged")
     ap.add_argument("--quiet", action="store_true",
                     help="suppress advisory output")
     args = ap.parse_args()
@@ -477,6 +508,26 @@ def main() -> int:
     findings += check_d003(docs_dir, readme_path, readme_text, root)
     findings += check_d004(readme_path, readme_text, args.file, root)
     findings += check_d005(readme_text, readme_path, root)
+
+    # --staged: keep only the findings whose file is among the staged paths.
+    # This is what a pre-commit hook needs: the commit is about the staged
+    # files, so a defect in a file nobody touched must not be reported on
+    # this commit. Without it, a repository with one old orphan page fails
+    # every commit forever, and a hook that always fails is a hook nobody
+    # reads. A finding with no file (none today) is kept: dropping it would
+    # be the fail-open direction.
+    staged = None
+    if args.staged:
+        staged = staged_paths(root)
+        if staged is not None:
+            before = len(findings)
+            findings = [f for f in findings
+                        if f.get("file") is None or f.get("file") in staged]
+            print("docs_lint: staged scope: {} of {} finding(s) are in staged files"
+                  .format(len(findings), before))
+        # else: git could not be asked. Keep every finding rather than
+        # silently passing: the gate must fail CLOSED when it cannot tell
+        # what is staged.
 
     hard = [f for f in findings if f["severity"] == "hard"]
     adv = [f for f in findings if f["severity"] == "advisory"]

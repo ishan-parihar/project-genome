@@ -30,6 +30,36 @@ for a in "$@"; do
   esac
 done
 
+# The scope flags are honoured by the checks that can honour them. Until
+# 2026-11-04 SCOPE was assigned here and then NEVER READ: the header
+# promised '--staged  # check only what a pre-commit hook staged' and the
+# script checked the whole worktree anyway. Measured consequence: a repo
+# with one old orphan page failed EVERY commit forever, which is how a gate
+# trains people to ignore it.
+#
+# What each check can do with a scope:
+#   docs_lint.py    --staged: report only findings in staged files
+#   score_readme.py no scope: it grades ONE file (README.md), so it runs
+#                   only when README.md itself is staged
+#   verify_per_package_readme.py  no scope: it grades every package README,
+#                   so it runs only when a package README is staged
+# A check with no scope capability is SKIPPED under --staged rather than
+# run over the whole tree, because running it unscoped is exactly the bug
+# this replaces.
+SCOPE_ARG=""
+STAGED_README=0
+STAGED_PACKAGE_README=0
+if [ "$SCOPE" = "--staged" ]; then
+  SCOPE_ARG="--staged"
+  STAGED_FILES="$(git -C "$ROOT" diff --cached --name-only --diff-filter=d 2>/dev/null || true)"
+  case "$STAGED_FILES" in
+    *README.md*) STAGED_README=1 ;;
+  esac
+  case "$STAGED_FILES" in
+    *packages/*/README.md*|*crates/*/README.md*) STAGED_PACKAGE_README=1 ;;
+  esac
+fi
+
 DOC_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCORER="$DOC_SCRIPT_DIR/score_readme.py"
 DOCSLINT="$DOC_SCRIPT_DIR/docs_lint.py"
@@ -55,26 +85,49 @@ run() { # run <label> <command...>
     echo "FAIL: $label (rc=$rc)${summary:+ — $summary}"
     if [ "$VERBOSE" = 1 ]; then echo "$out" | sed 's/^/      /' | head -40; fi
   fi
+  # THE FAILURE MUST REACH THE EXIT CODE, AND `run` IS THE ONLY PLACE THAT KNOWS IT.
+  #
+  # Measured 2026-11-04: only the README rubric ended in `|| rc=2`. The outward
+  # boundary and the genome boundary printed their FAIL line and then the script
+  # went on to print "docs-check: clean" and exit 0 — a dead link, an orphan page
+  # and a W008/W009 warning ALL failed the gate in appearance only. The gate
+  # reported the failure and swallowed it in the same breath.
+  #
+  # It was left to each call site to remember `|| rc=2`, and three of the four
+  # did not. The fix is here rather than at the call sites: a check that FAILS
+  # now sets the script's verdict itself, so a new check cannot be added without
+  # inheriting the bug.
+  if [ "$rc" -ne 0 ] && [ "$rc" -ne "$RC" ]; then RC=2; fi
   return $rc
 }
 
 skip() { echo "skip: $1"; }
 
 echo "docs-check: $ROOT"
+# The script's verdict. `run` sets it itself (see below), so a check cannot be
+# added without inheriting the failure-propagation.
+RC=0
 rc=0
 
 # 1. README archetype score — always, if a README exists
 if [ -f "$ROOT/README.md" ]; then
   # --archetype auto: the generic bar mis-scores non-visual repos (see score_readme.py).
   # The redirect that used to sit here swallowed the FAIL line, so the failure was silent.
-  run "README rubric" python3 "$SCORER" "$ROOT/README.md" --archetype auto || rc=2
+  # Under --staged this runs ONLY when README.md is staged: the scorer grades
+  # one file and cannot be narrowed, so running it unscoped would report a
+  # README problem on every commit that never touched the README.
+  if [ "$STAGED_README" -eq 1 ] || [ "$SCOPE" != "--staged" ]; then
+    run "README rubric" python3 "$SCORER" "$ROOT/README.md" --archetype auto
+  else
+    skip "README rubric (README.md not staged)"
+  fi
 else
   skip "no README.md"
 fi
 
 # 2. Outward boundary (dead links, orphans, anchors)
 if [ -f "$ROOT/README.md" ]; then
-  run "outward boundary (D001-D005)" python3 "$DOCSLINT" --root "$ROOT" --quiet
+  run "outward boundary (D001-D005)" python3 "$DOCSLINT" --root "$ROOT" --quiet $SCOPE_ARG
 fi
 
 # 3. Per-package contract — only if packages/ or crates/ exists
@@ -83,7 +136,11 @@ for d in packages crates; do
   [ -d "$ROOT/$d" ] && PKG_DIR="$ROOT/$d" && break
 done
 if [ -n "$PKG_DIR" ]; then
-  run "per-package README contract" python3 "$PPR" --packages-dir "$PKG_DIR"
+  if [ "$STAGED_PACKAGE_README" -eq 1 ] || [ "$SCOPE" != "--staged" ]; then
+    run "per-package README contract" python3 "$PPR" --packages-dir "$PKG_DIR"
+  else
+    skip "per-package README contract (no package README staged)"
+  fi
 else
   skip "no packages/ or crates/"
 fi
@@ -106,5 +163,5 @@ if [ "$MODE" = "warn" ]; then
   echo "docs-check: warn mode — findings reported, not gating"
   exit 0
 fi
-[ "$rc" -ne 0 ] && echo "docs-check: FAILED ($rc)" || echo "docs-check: clean"
-exit $rc
+[ "$RC" -ne 0 ] && echo "docs-check: FAILED ($RC)" || echo "docs-check: clean"
+exit $RC
