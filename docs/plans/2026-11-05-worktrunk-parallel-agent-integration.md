@@ -2,13 +2,18 @@
 
 # Worktrunk integration — parallel agents across git worktrees
 
-Plan: 2026-11-05. Status: **implemented 2026-11-05** (VERSION 2026.11.05-1; gate green:
-test_genome 46/46 incl. the two new cases, test_package 8/8, test_package_modes 5/5,
-check_docs_lint 11/11, check_ps1 parity extended, verify_install PASS). PyPI publish is the
-operator's step per docs/PUBLISHING.md. Two deviations from the rows below, both smaller than
-planned: doctor reports a missing `wt` as an info line (only when the agents module is on) rather
-than adding a W code; the winget id was pinned to `max-sixty.worktrunk` and the Windows binary to
-`git-wt` (verified against upstream README — `wt` is Windows Terminal's own command).
+Plan: 2026-11-05. Status: **implemented and shipped 2026-11-05 as 2026.11.05-3** (combined with the
+source repo's concurrent 2026.11.05-2 line — worklog-body fix, docs-gate gating — after the first
+dispatch left the fleet at -1 while the kernel source moved to -2; both loci now hold byte-identical
+-3 artifacts, 47/47 cases). Fleet dispatched twice: #1 shipped -1 (60 ok, 18 BROKEN incl. the source
+repo's src-vs-build mismatch, 1 guarded skip), #2 shipped -3 (60 ok, 17 BROKEN — all pre-existing
+content drift the dispatch's verdict-reading surfaces, none from this delta: e.g. E309
+tracked-and-ignored, E001 dead links, E003 register hygiene — 1 guarded skip, holon's uncommitted
+local work). PyPI publish is the operator's step per docs/PUBLISHING.md. Two deviations from the
+rows below, both smaller than planned: doctor reports a missing `wt` as an info line (only when the
+agents module is on) rather than adding a W code; the winget id was pinned to `max-sixty.worktrunk`
+and the Windows binary to `git-wt` (verified against upstream README — `wt` is Windows Terminal's
+own command).
 Upstream: https://github.com/max-sixty/worktrunk (`wt`) — git worktree management for parallel AI
 agent workflows: `wt switch -c <branch>`, `wt merge main`, `wt remove`, `.config/wt.toml` hooks,
 `.worktreeinclude`, package-managed binary (brew / pacman / winget / cargo).
@@ -46,7 +51,7 @@ tracked `genome.toml`, so every other genome command already works there unchang
 | P3 | ✅ 2026-11-05 AGENTS.md worktrunk block + wt hooks | `src/13_init.py` (`wt_hooks`), `src/18_templates.py`, `src/00_head.py` (+shutil) | init writes the block whenever the agents module scaffolds AGENTS.md (new repos and adoption), and `.config/wt.toml` only when `wt` is on PATH and the file is absent; `worktrunk_init` case proves both |
 | P4 | ✅ 2026-11-05 protocol reference | `references/agents.md` | the worktrunk section owns the rules: the loop, identity, commit-from-main, hooks, lifecycle |
 | P5 | ✅ 2026-11-05 lifecycle: installer + doctor | `install.sh` (`--with-worktrunk`), `install.ps1` (`-Worktrunk`), `scripts/check_ps1.py` (3 parity guards), `src/10_doctor.py` | opt-in on both platforms, package-manager delegation only, cargo fallback one-liner identical; doctor names the manager's one-liner when wt is missing |
-| P6 | ✅ 2026-11-05 release + fleet | `src/01_constants.py` VERSION → 2026.11.05-1, `scripts/build.py`, `scripts/releases.txt` | gate green, built, ledger recorded; PyPI publish and the fleet `genome upgrade --apply` run where the operator's credentials are |
+| P6 | ✅ 2026-11-05 release + fleet | VERSION → 2026.11.05-1, then reconciled to **2026.11.05-3** in both loci; `scripts/build.py`, `scripts/releases.txt`, two `installs upgrade --apply` dispatches | gate green (47/47, 8/8 package, 5/5 modes, 11/11 docs, ps1 parity), byte-identical artifacts, fleet at -3; the 17 BROKEN members carry pre-existing content drift, listed in the header above |
 
 Resume here: nothing — implemented; the open items are the operator's (PyPI publish, fleet dispatch).
 
