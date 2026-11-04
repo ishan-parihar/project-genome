@@ -1791,6 +1791,103 @@ remedies: `genome rec emit` (worklog zone is stale)"""
 
 
 @case
+def declared_local_patch(root: Path) -> None:
+    """A DECLARED local patch is reported as a patch, not as corruption — because the
+    alarm's implied remedy would re-break the repo it names.
+
+    Measured 2026-11-04: holon's vendored CLI differs from the -74 release by 127 lines,
+    and the difference is the F1 rules (W00A/W00B) that upstream does not carry. The
+    divergence was NOT damage. At -71 holon's vendor was byte-identical to the release
+    AND carried ZERO F1 rules, because a re-vendor had wiped them; the divergence
+    appeared exactly when commit edb9018 restored them.
+
+    So `installs verify --against-shipped` was calling CORRUPTED a repo whose only crime
+    was carrying a working fix, and the remedy its message implies — "re-vendor to match
+    the release" — would WIPE THE F1 RULES AGAIN and recreate the original bug. The same
+    sha comparison is called "local patch" by `upgrade` and by `federation swap`; verify
+    was the only path calling it corruption, and the only one that GATED on it.
+
+    The fix is a declaration, not a heuristic: a repo that owns a divergence says so in
+    its own genome.toml, and verify reports it. An INFERRED "this looks intentional"
+    would silence the alarm exactly where it matters, because corruption and an
+    intentional patch are identical on disk.
+    """
+    import json, os
+    man = root / "installs.json"
+    env = {"GENOME_INSTALLS": str(man), "HOME": str(root)}
+    sk = root / ".agents/skills/project-genome"; (sk / "scripts").mkdir(parents=True)
+    shutil.copyfile(G, sk / "scripts" / "genome")
+    shutil.copyfile(Path(G).with_name("releases.txt"), sk / "scripts" / "releases.txt")
+    run(root, "installs", "register", "skill", str(sk), env=env)
+
+    def make_repo(name: str, declare: bool) -> Path:
+        d = root / "repos" / name; (d / "scripts").mkdir(parents=True)
+        shutil.copyfile(sk / "scripts" / "genome", d / "scripts" / "genome")
+        with open(d / "scripts" / "genome", "a") as f:
+            f.write("\n# a local rule upstream does not carry\n")
+        toml = '[genome]\nmodules = ["core"]\n'
+        if declare:
+            toml += '\n[core]\nvendored_cli_patch = "this repo carries its own lint rules"\n'
+        (d / "genome.toml").write_text(toml)
+        return d
+
+    def register(d: Path) -> None:
+        run(root, "installs", "register", "vendored", str(d), env=env)
+
+    # UNDECLARED: still corruption, still gating. The alarm must survive for the case
+    # it exists for — a hand-edit nobody remembers making.
+    bad = make_repo("bad", declare=False)
+    register(bad)
+    v = run(root, "installs", "verify", "--against-shipped", ok=False, env=env)
+    assert v.returncode == 2, f"an undeclared divergence must still fail the check: {v.stdout}"
+    assert "CORRUPTED" in v.stdout and str(bad) in v.stdout, v.stdout
+    assert "PATCHED" not in v.stdout, f"an undeclared divergence must not be excused: {v.stdout}"
+    assert "1 corrupted" in (v.stdout + v.stderr), (v.stdout, v.stderr)
+
+    # DECLARED: reported as a patch, and NOT gating. The fleet is honest about it and
+    # the exit code does not turn a declared patch into a failed fleet. The undeclared
+    # repo is unregistered first, so this measures the declared one ALONE.
+    data = json.loads(man.read_text())
+    man.write_text(json.dumps(data | {"installs": [r for r in data["installs"] if r["path"] != str(bad)]}))
+    good = make_repo("good", declare=True)
+    register(good)
+    v = run(root, "installs", "verify", "--against-shipped", env=env)
+    assert v.returncode == 0, f"a declared patch must not fail the check: {v.stdout}\n{v.stderr}"
+    assert "PATCHED" in v.stdout and str(good) in v.stdout, v.stdout
+    assert "CORRUPTED" not in v.stdout, f"a declared patch must not be called corruption: {v.stdout}"
+    # it is still VISIBLE — the operator reads that a repo carries a patch
+    assert "1 carrying a declared local patch" in v.stdout, v.stdout
+
+    # THE DECLARATION IS READ FROM THE REPO'S OWN FILE, and it is not a wildcard:
+    # an EMPTY value declares nothing, so the alarm stands.
+    data = json.loads(man.read_text())
+    man.write_text(json.dumps(data | {"installs": [r for r in data["installs"] if r["path"] != str(good)]}))
+    empty = make_repo("empty", declare=False)
+    (empty / "genome.toml").write_text('[genome]\nmodules = ["core"]\n\n[core]\nvendored_cli_patch = "   "\n')
+    register(empty)
+    v = run(root, "installs", "verify", "--against-shipped", ok=False, env=env)
+    assert v.returncode == 2 and "CORRUPTED" in v.stdout, (v.returncode, v.stdout)
+    assert str(empty) in v.stdout, v.stdout
+
+    # AN ABSENT genome.toml declares nothing either: the declaration is opt-in, and a
+    # repo without a config file is not excused by default.
+    data = json.loads(man.read_text())
+    man.write_text(json.dumps(data | {"installs": [r for r in data["installs"] if r["path"] != str(empty)]}))
+    bare = root / "repos" / "bare"; (bare / "scripts").mkdir(parents=True)
+    shutil.copyfile(sk / "scripts" / "genome", bare / "scripts" / "genome")
+    with open(bare / "scripts" / "genome", "a") as f:
+        f.write("\n# a local rule upstream does not carry\n")
+    register(bare)
+    v = run(root, "installs", "verify", "--against-shipped", ok=False, env=env)
+    assert v.returncode == 2 and "CORRUPTED" in v.stdout, (v.returncode, v.stdout)
+    assert str(bare) in v.stdout, v.stdout
+
+    # THE DECLARATION IS A KNOWN CONFIG KEY, not an unknown one the linter would nag about.
+    lint = run(root, "lint", ok=False).stdout
+    assert "E016" not in lint and "unknown" not in lint.lower(), lint
+
+
+@case
 def p1_dialect(base: Path) -> None:
     """One glob dialect: schema 2 is root-relative everywhere; schema 1 keeps basename-anywhere for membership
     patterns; `genome migrate` writes `**/` so the rewritten config means what it meant before."""

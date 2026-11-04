@@ -99,7 +99,7 @@ ERR = 2
 MIN_CHUNK = 5  # lines; `ask` hits narrower than this point at a lead line without its content
 HUB_NODE_CAP = 3000  # nodes; above this `graph hubs` ranks by degree and says betweenness was not computed
 _TMP_SEQ = itertools.count()  # makes each atomic_write temp name unique within this process too
-VERSION = "2026.11.02-74"
+VERSION = "2026.11.02-75"
 # every key genome reads: an unknown key is a typo that would silently switch a check off (E017)
 CONFIG_KEYS = {
     "genome": {"modules", "schema_version"},
@@ -109,7 +109,7 @@ CONFIG_KEYS = {
     "drift": {"mode", "paths", "warn_until"},
     "core": {"append_window", "archive_form", "ask_days", "ask_globs", "ask_index", "budgets", "checklist", "dated_pattern",
              "emitters", "gate", "living_plans", "never_commit", "pointer_ignore", "resume", "resume_heading",
-             "resume_lines", "toc_lines", "wake_lines", "worklog_form", "worklog_index", "worklog_width"},
+             "resume_lines", "toc_lines", "vendored_cli_patch", "wake_lines", "worklog_form", "worklog_index", "worklog_width"},
     "records": {"archive", "mode", "prefix", "recon_hours", "width", "zones", "required", "governed_by"},
     "research": {"classes", "figure_pattern", "hyp_prefix", "hyp_statuses", "surfaces", "quarantine_surfaces"},
     "ops": {"bulk_allow", "bulk_globs", "code_globs", "code_roots", "jobs", "link_prefixes", "link_surfaces",
