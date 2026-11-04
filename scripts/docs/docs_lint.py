@@ -281,6 +281,20 @@ def check_d003(docs_dir, readme_path, readme_text, root):
     not readers, and are never meant to be README-linked. A repo that keeps its
     dated-frozen records elsewhere (docs/design/YYYY-MM-DD-*.md) is the same
     convention under a different name, so the dated-filename form is exempt too.
+
+    THE RECORDS INDEX IS EXEMPT TOO, and it is the one case that reads like a
+    bug until you know what the file is. `docs/RECORDS.md` is the genome's
+    `records_index` role — the generated index over docs/decisions and
+    docs/regressions, which are BOTH already exempt as internal dirs. It sits at
+    the top of docs/ rather than inside a directory of its own, so the
+    directory rule missed it and it was reported as an orphan.
+
+    Measured 2026-11-04: D003 fired on it in this repo, on a file that
+    AGENTS.md names in its routing table ("why X is the way it is / what bit us").
+    The reference is a CODE SPAN, not a markdown link, so no linker scan would
+    have helped, and the page is not a reader page at all: it is written by
+    `genome rec emit` and read by tooling. A reader-facing page in docs/ is
+    linked from README — ARCHITECTURE.md, RUNBOOK.md and PUBLISHING.md all are.
     """
     findings = []
     if not docs_dir.is_dir():
@@ -290,12 +304,17 @@ def check_d003(docs_dir, readme_path, readme_text, root):
         return findings
     internal_dirs = {"handoff", "kb", "archive", "plans", "audit", "decisions",
                      "regressions", "workflows", "internal", "design"}
+    # The generated index over the decisions/ and regressions/ records. Exempt for
+    # the same reason those two directories are: it is a tooling-owned page, not a
+    # reader page, and its path is a genome ROLE rather than a directory name.
+    internal_files = {"RECORDS"}
     dated = re.compile(r"^\d{4}-\d{2}-\d{2}-.+\.md$")
     # GitHub-UI meta docs are linked from the repo's Community/Security tabs, not the README.
     meta_docs = {"CODE_OF_CONDUCT", "CONTRIBUTING", "SECURITY", "SUPPORT", "ATTRIBUTION",
                  "CHANGELOG", "GOVERNANCE"}
     pages = [p for p in pages
              if not (any(part in internal_dirs for part in p.relative_to(docs_dir).parts[:-1])
+                     or p.stem.upper() in internal_files
                      or dated.match(p.name) or p.stem.upper() in meta_docs)]
     if not pages:
         return findings
