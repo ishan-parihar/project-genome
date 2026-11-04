@@ -95,6 +95,28 @@ def agents_tpl(mods: list[str], gate: str) -> str:
         rows_ += [("the stack: language, size, wiring, gate (generated)", "the `stack` zone below — `genome outline`"),
                   ("how those parts fit together, and the reading order", "`docs/OUTLINE.md`")]
     table = "\n".join(f"| {q} | {a} |" for q, a in rows_)
+    wt = ""
+    if "agents" in mods:
+        wt = """
+## Parallel agents — worktrees
+
+Several agents work this repo at once through git worktrees (`wt`, worktrunk). One agent = one
+worktree = one `GENOME_AGENT_ID`. Boards, feed and claims live in the **main worktree** (the
+coordination home) wherever you run the commands from; code stays isolated in your worktree.
+
+```bash
+export GENOME_AGENT_ID=<agent id>   # identity for claims/feed — one agent = one worktree
+wt switch -c <branch>               # your isolated checkout
+genome wake                         # orientation + inbox — works inside a worktree
+genome claim <item>                 # flock-guarded across ALL worktrees of this repo
+# … work …
+genome done <item> done --evidence <path>
+wt merge main                       # squash, rebase, merge, cleanup
+```
+
+Commit board/feed changes from the main worktree (`genome close` there); `wt merge` never touches
+them. Register claims (`claim-register`) and register transitions are main-worktree work.
+"""
     return f"""# AGENTS.md — the entry contract
 
 Orientation, the gate, and **which document owns which question**.
@@ -121,7 +143,7 @@ The card's `architecture` class points here until a repo names a different owner
 | question | answer lives in |
 |---|---|
 {table}
-
+{wt}
 ## Rules
 
 1. One owner per question; amend the owner, never add a second.

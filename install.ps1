@@ -18,6 +18,8 @@
 #   -CopySkill    copy the skill into every root instead of linking one canonical copy
 #   -FromGitHub   install the CLI from the Git repo instead of PyPI
 #   -NoCta        skip the star/donate epilogue (also: $env:SKIP_CTA = '1')
+#   -Worktrunk    also install the worktrunk CLI via winget/cargo — optional, off by
+#                 default ($env:SKIP_WORKTRUNK = '1' overrides the switch)
 #   -ForceRoot    allow running as an elevated administrator
 
 param(
@@ -25,6 +27,7 @@ param(
     [string[]]$Dir,
     [switch]$CopySkill,
     [switch]$FromGitHub,
+    [switch]$Worktrunk,
     [switch]$NoCta,
     [switch]$ForceRoot
 )
@@ -221,6 +224,39 @@ reg_install() {
     }
 }
 if ($genomeCmd) { reg_install 'bin' $genomeCmd.Source 'via install.ps1' }
+
+# ── worktrunk: the parallel-agent worktree CLI (optional, off by default) ───
+# `wt` (worktrunk) gives each parallel agent an isolated git worktree; the agents
+# module coordinates across them. A package-managed binary, so this step delegates
+# to a package manager and never fetches an arbitrary script — the installer
+# bootstraps, the manager owns updates. Off by default for the same reason -Skill is.
+function Install-Worktrunk {
+    # On Windows winget installs the binary as `git-wt`: `wt` is Windows Terminal's own
+    # command, so worktrunk avoids the alias conflict by shipping under the other name.
+    foreach ($name in 'wt', 'git-wt') {
+        if (Get-Command $name -ErrorAction SilentlyContinue) {
+            Info "worktrunk already present: $( (& $name --version 2>$null | Select-Object -First 1) )"
+            return
+        }
+    }
+    if (Get-Command winget -ErrorAction SilentlyContinue) {
+        $cmd = 'winget install --id max-sixty.worktrunk --accept-source-agreements --accept-package-agreements'
+    } elseif (Get-Command cargo -ErrorAction SilentlyContinue) {
+        $cmd = 'cargo install worktrunk --locked'
+    } else {
+        Warn "no winget or cargo found — install worktrunk with: winget install max-sixty.worktrunk"
+        return
+    }
+    Info "installing worktrunk: $cmd"
+    cmd /c "$cmd" 2>&1 | Out-Null
+    $have = @('wt', 'git-wt') | Where-Object { Get-Command $_ -ErrorAction SilentlyContinue }
+    if ($have) {
+        Info "worktrunk installed as $have"
+    } else {
+        Warn "could not install worktrunk automatically — run this yourself: $cmd"
+    }
+}
+if ($Worktrunk -and -not $env:SKIP_WORKTRUNK) { Install-Worktrunk }
 
 # ── skill bundle (optional) ─────────────────────────────────────────────────
 # The canonical skills root: ONE real copy lives there, because it is the root a

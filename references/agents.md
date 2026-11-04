@@ -60,3 +60,35 @@ The feed is a file in git, so it is reviewable, greppable, and survives the tool
 
 `genome claim-register R7` **appends** the claim to the row's notes cell, keeping the existing context.
 `genome status` then refuses transitions on a row another agent holds unless `--agent` matches.
+
+## Worktrunk: parallel agents across git worktrees
+
+When the parallelism is per-checkout (`wt`, worktrunk), the same protocol holds with one rule:
+**the main worktree is the coordination home.** Boards, feed and seen marks resolve to it no
+matter which worktree a command runs in — flock guards one real inode, feed ids are minted once,
+the inbox is not per-worktree. Code stays isolated in the worktree and lands through `wt merge`;
+board/feed records land through `genome close` run in the main worktree.
+
+```bash
+export GENOME_AGENT_ID=<agent id>   # one agent = one worktree; the id is the agent's stable identity
+wt switch -c <branch>               # your isolated checkout
+genome wake                         # prints the coordination line, then state, inbox, health
+genome claim <item>                 # flock-guarded across ALL worktrees of this repo
+genome done <item> done --evidence <path>
+wt merge main                       # squash, rebase, merge, cleanup
+```
+
+- `wake` inside a linked worktree prints one `coordination:` line naming the main checkout — that is
+  the confirmation the resolution is live. A fresh worktree reads the inbox from the coordination
+  home even before the feed's first commit from main.
+- Register claims (`claim-register`) and `status` transitions still run against the local checkout:
+  they are main-worktree work. Boards are the operational surface beneath the register; route
+  per-worktree todos through them.
+- `genome init` writes `.config/wt.toml` when `wt` is installed (hooks: `pre-start` → `genome wake`,
+  `pre-merge` → `genome lint`), so the wt lifecycle runs genome's own gates. Project commands need
+  first-run approval — expected. Repos that only vendor the CLI adjust the command to their
+  invocation (`python3 scripts/genome …`).
+- Lifecycle of `wt` itself: installed by `install.sh --with-worktrunk` / `install.ps1` (off by
+  default), checked by `genome doctor`, updated and removed by the package manager that owns it.
+  project-genome never ships a wt updater — the installer rule forbids competing with package
+  managers.

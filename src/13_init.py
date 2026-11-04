@@ -44,6 +44,18 @@ def ignore_runtime(root: Path) -> list[str]:
     return [f".gitignore (+{', '.join(want)})"]
 
 
+def wt_hooks(root: Path) -> list[str]:
+    """When worktrunk is installed, wire its lifecycle to genome: wake on worktree start, lint
+    before a merge. No wt, or hooks already present → nothing written; a later init offers again."""
+    if shutil.which("wt") is None or (root / ".config" / "wt.toml").exists():
+        return []
+    p = root / ".config" / "wt.toml"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text("# worktrunk hooks — genome joins the wt lifecycle (project commands need first-run approval)\n"
+                 "[pre-start]\ngenome = \"genome wake\"\n\n[pre-merge]\ngenome = \"genome lint\"\n")
+    return [".config/wt.toml"]
+
+
 def cmd_init(args) -> None:
     root = Path.cwd().resolve()
     chain = bp_chain([s for a in args.blueprint or [] for s in a.split(",") if s], root)
@@ -56,6 +68,8 @@ def cmd_init(args) -> None:
         if chain:
             bp_preflight(cfg, chain)
         made = scaffold_roles(cfg) + ignore_runtime(root)
+        if "agents" in cfg.modules:
+            made += wt_hooks(root)
         if chain:
             made += bp_apply(root, chain)
         print(f"genome init: genome.toml kept; {len(made)} change(s): missing roles at their mapped paths, runtime ignores")
@@ -119,6 +133,8 @@ def cmd_init(args) -> None:
         for d in dirs.get(m, []):
             (root / d).mkdir(parents=True, exist_ok=True)
     made += ignore_runtime(root)
+    if "agents" in mods:
+        made += wt_hooks(root)
     if "records" in mods:
         cfg = find_cfg(root)
         emit_records(cfg)

@@ -75,6 +75,29 @@ class Cfg:
         v = self.get("core", "pointer_ignore", "")
         return set(v.split() if isinstance(v, str) else v)
 
+    def coord_root(self) -> Path:
+        """The checkout the agents module's mutable state (boards, feed, seen marks) lives in: inside
+        a linked git worktree that is the MAIN worktree — the coordination home — so flock guards one
+        real inode, feed ids are minted once and the inbox is not per-worktree. Everywhere else it is
+        root. The main worktree is trusted only when it carries this genome's config (a submodule's or
+        bare repo's common dir does not, and a pruned main worktree must not strand the state)."""
+        if getattr(self, "_coord", None) is None:
+            home = self.root
+            if (self.root / ".git").is_file():  # a linked worktree: .git is a file into <main>/.git/worktrees/<id>
+                gitdir = sh(self.root, "git", "rev-parse", "--path-format=absolute", "--git-dir").strip()
+                common = sh(self.root, "git", "rev-parse", "--path-format=absolute", "--git-common-dir").strip()
+                main = Path(common).resolve().parent if common else None
+                if common and gitdir and common != gitdir and main \
+                        and ((main / "genome.toml").is_file() or (main / "kb.toml").is_file()):
+                    home = main
+            self._coord = home
+        return self._coord
+
+    def coord(self, p: Path) -> Path:
+        """Re-root a role path onto the coordination home (see coord_root)."""
+        home = self.coord_root()
+        return p if home == self.root else home / p.relative_to(self.root)
+
 
 def deep_merge(base: dict, more: dict) -> dict:
     for k, v in more.items():

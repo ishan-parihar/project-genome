@@ -134,6 +134,12 @@ def check(path: Path) -> int:
             # Update guidance: an installed user's next question has an answer on
             # both platforms or the installer has a platform-dependent hole.
             ("To update later", "both", "update guidance in the success summary"),
+            # The worktrunk step is opt-in on both platforms (a user who wanted the
+            # CLI must not receive a second binary they never asked for), and both
+            # name the same cargo fallback so neither loses the non-native path.
+            ("--with-worktrunk", "sh", "worktrunk install step is opt-in (bash)"),
+            ("[switch]$Worktrunk", "ps1", "worktrunk install step is opt-in (PowerShell)"),
+            ("cargo install worktrunk --locked", "both", "worktrunk cargo fallback one-liner"),
         ]
         for needle, where, label in guards:
             if where == "both":

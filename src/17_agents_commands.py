@@ -8,7 +8,7 @@ def agent_id(args) -> str:
 def _post(cfg: Cfg, aid: str, msg: str, wf=None, to=None, reply=None) -> str | None:
     if cfg.form("feed")[0] != "file" or "agents" not in cfg.modules:
         return None
-    feed = cfg.path("feed")
+    feed = cfg.coord(cfg.path("feed"))
     feed.parent.mkdir(parents=True, exist_ok=True)
     with Guarded(feed):
         ids = [int(x) for x in re.findall(r"\*\*\[F(\d{4,})\]", read(feed))]
@@ -23,11 +23,11 @@ def _post(cfg: Cfg, aid: str, msg: str, wf=None, to=None, reply=None) -> str | N
 def _wf_path(cfg: Cfg, wf: str) -> Path:
     if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,40}", wf or ""):
         die(f"workflow name `{wf}` must be kebab-case")
-    return cfg.require("workflows", "genome wf") / f"{wf}.md"
+    return cfg.coord(cfg.require("workflows", "genome wf")) / f"{wf}.md"
 
 
 def _board_of(cfg: Cfg, item: str) -> Path:
-    d = cfg.path("workflows")
+    d = cfg.coord(cfg.path("workflows"))
     for f in sorted(d.glob("*.md")) if d.is_dir() else []:
         if find_row(f, item):
             return f
@@ -54,7 +54,7 @@ def cmd_wf(args) -> None:
             append_row(p, [f"{args.name}-{n:03d}", "open", args.item, "—", "—"], "")
         print(f"{args.name}-{n:03d} added (open)")
     else:
-        d = cfg.path("workflows")
+        d = cfg.coord(cfg.path("workflows"))
         for f in sorted(d.glob("*.md")) if d.is_dir() else []:
             rs = rows(f)
             print(f"{f.stem:24} {len(rs):3} rows, {sum(r[1] == 'open' for r in rs if len(r) > 1)} open")
@@ -125,7 +125,7 @@ def cmd_post(args) -> None:
 def cmd_feed(args) -> None:
     cfg = find_cfg()
     cfg.need("agents")
-    feed = cfg.require("feed", "genome feed")
+    feed = cfg.coord(cfg.require("feed", "genome feed"))
     lines = read(feed).splitlines()
     if args.since:
         idx = next((i for i, l in enumerate(lines) if f"[{args.since}]" in l), None)

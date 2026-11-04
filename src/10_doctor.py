@@ -141,10 +141,16 @@ def doctor_findings(cfg: Cfg) -> tuple[list[str], list[str]]:
             if len(r) > 5 and r[2] == "ruled" and r[5] in ("", "—"):
                 finds.append(f"ruling {r[0]} not applied to its owner (genome q apply {r[0]} --applied <path>)")
     finds += running_edits(cfg)
-    d = cfg.path("workflows")
+    d = cfg.coord(cfg.path("workflows"))
     if "agents" in cfg.modules and cfg.form("workflows")[0] == "file" and d.is_dir():
         for f in sorted(d.glob("*.md")):
             info += [f"live claim {f.stem}: {r[0]} {r[3]}" for r in rows(f) if len(r) > 3 and r[1] == "in-progress"]
+    if "agents" in cfg.modules and shutil.which("wt") is None:
+        mgr = ("brew install worktrunk" if sys.platform == "darwin"
+               else "sudo pacman -S worktrunk" if Path("/etc/arch-release").exists()
+               else "winget install max-sixty.worktrunk" if sys.platform == "win32"
+               else "cargo install worktrunk --locked")
+        info.append(f"worktrunk not installed (parallel-agent worktrees): {mgr}")
     return finds, info
 
 

@@ -23,6 +23,9 @@ def cmd_wake(args) -> None:
     dirty = len(sh(cfg.root, "git", "status", "--porcelain").splitlines())
     print(f"# genome wake — {cfg.root.name} @ {br or '-'} {head or '-'} ({dirty} dirty) "
           f"[{', '.join(sorted(cfg.modules))}]")
+    if cfg.coord_root() != cfg.root:
+        print(f"coordination: linked worktree — boards, feed and claims live in the main checkout "
+              f"({cfg.coord_root()}); finish code with `wt merge`, commit records from the main worktree")
     cap = cfg.get("core", "wake_lines", 18)
     if cfg.has("state"):
         lines = read(cfg.path("state")).splitlines()
@@ -75,19 +78,20 @@ def cmd_wake(args) -> None:
     elif cfg.has("worklog"):
         print("\n## LAST WORKLOG")
         print("\n".join(read(cfg.path("worklog")).splitlines()[-3:]))
-    if "agents" in cfg.modules and cfg.has("feed"):
+    if "agents" in cfg.modules and (cfg.has("feed") or cfg.coord(cfg.path("feed")).exists()):
         aid = os.environ.get("GENOME_AGENT_ID") or os.environ.get("KB_AGENT_ID")
         if aid:
-            seen_f = cfg.root / ".genome" / f"seen-{aid}"
+            seen_f = cfg.coord(cfg.root / ".genome" / f"seen-{aid}")
             seen = read(seen_f).strip()
-            lines = read(cfg.path("feed")).splitlines()
+            feed = cfg.coord(cfg.path("feed"))
+            lines = read(feed).splitlines()
             if seen:
                 idx = next((i for i, l in enumerate(lines) if f"[{seen}]" in l), -1)
                 lines = lines[idx + 1:]
             mine = [l for l in lines if f"@{aid}" in l]
             print(f"\n## INBOX  @{aid}: {len(mine)} new")
             print("\n".join(mine[-8:]))
-            ids = re.findall(r"\*\*\[(F\d{4,})\]", read(cfg.path("feed")))
+            ids = re.findall(r"\*\*\[(F\d{4,})\]", read(feed))
             if ids:
                 seen_f.parent.mkdir(exist_ok=True)
                 seen_f.write_text(ids[-1])

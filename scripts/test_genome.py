@@ -143,6 +143,42 @@ def agents(root: Path) -> None:
 
 
 @case
+def worktree_coordination(root: Path) -> None:
+    """linked worktree: claims, feed ids and seen marks resolve to the main worktree (the coordination home)"""
+    full_repo(root)
+    wt = root.parent / f"{root.name}-wt"
+    git(root, "worktree", "add", "-b", "feat", str(wt))
+    run(root, "wf", "new", "mig"); run(root, "wf", "add", "mig", "move table")
+    run(root, "claim", "mig-001", "--agent", "a")                 # claimed in the main worktree
+    r = run(wt, "claim", "mig-001", "--agent", "b", ok=False)     # the claim is visible from another worktree
+    assert r.returncode == 2 and "claimed by a" in r.stdout + r.stderr, r.stdout + r.stderr
+    # claim posts F0001 from the main worktree; the worktree's post continues that
+    # sequence (F0002) instead of minting F0001 again from its stale local copy
+    assert "F0002" in run(wt, "post", "from the worktree").stdout
+    r = run(wt, "wake")
+    assert "coordination:" in r.stdout and root.as_posix() in r.stdout, r.stdout
+    run(wt, "post", "hey @c", "--to", "@c", env={"GENOME_AGENT_ID": "tester"})
+    assert "1 new" in run(wt, "wake", env={"GENOME_AGENT_ID": "c"}).stdout
+    # the read mark is written to the coordination home, so the next wake (any worktree) starts here
+    assert "1 new" not in run(wt, "wake", env={"GENOME_AGENT_ID": "c"}).stdout
+
+
+@case
+def worktrunk_init(root: Path) -> None:
+    """init with agents on: the AGENTS.md worktrunk loop always, the wt.toml hooks only when wt exists"""
+    new_repo(root)
+    run(root, "init", "--profile", "team")
+    assert "Parallel agents — worktrees" in (root / "AGENTS.md").read_text()
+    (root / ".config" / "wt.toml").unlink(missing_ok=True)  # a host with a real wt already wrote these; re-offer
+    fake = root.parent / f"{root.name}-bin"
+    fake.mkdir()
+    (fake / "wt").write_text("#!/bin/sh\nexit 0\n")
+    (fake / "wt").chmod(0o755)
+    run(root, "init", "--profile", "team", env={"PATH": f"{fake}:{os.environ['PATH']}"})
+    assert "worktrunk hooks" in (root / ".config" / "wt.toml").read_text()
+
+
+@case
 def numbered_worklog(root: Path) -> None:
     """numbered worklog and E014"""
     full_repo(root)

@@ -19,6 +19,8 @@
 #   --skill        also install the skill bundle into every detected harness
 #   --dir <path>   extra skills root (repeatable) for --skill
 #   --from-github  install the CLI from the Git repo instead of PyPI (unreleased builds)
+#   --with-worktrunk  also install the worktrunk CLI (`wt`) via the machine's package
+#                     manager — optional, off by default (SKIP_WORKTRUNK=1 overrides)
 #   --no-cta       skip the star/donate epilogue (also: SKIP_CTA=1)
 #   --force-root   allow running as root (installs into $HOME of root)
 #   --copy-skill   copy the skill into every root instead of linking one canonical copy
@@ -62,6 +64,7 @@ die()  { err "$*"; printf '      fix it, then re-run this installer.\n' >&2; exi
 SKIP_SKILL=1
 FROM_GITHUB=0
 COPY_SKILL=0
+SKIP_WT=1
 EXTRA_DIRS=()
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -69,10 +72,11 @@ while [ $# -gt 0 ]; do
     --dir)         EXTRA_DIRS+=("$2"); shift 2 ;;
     --copy-skill)  COPY_SKILL=1; shift ;;
     --from-github) FROM_GITHUB=1; shift ;;
+    --with-worktrunk) SKIP_WT=0; shift ;;
     --no-cta)      SKIP_CTA=1; shift ;;
     --force-root)  FORCE_ROOT=1; shift ;;
     --help|-h)     sed -n '2,30p' "$0"; exit 0 ;;
-    *) die "Unknown option: $1 (supported: --skill, --dir <path>, --copy-skill, --from-github, --no-cta, --force-root)" ;;
+    *) die "Unknown option: $1 (supported: --skill, --dir <path>, --copy-skill, --from-github, --with-worktrunk, --no-cta, --force-root)" ;;
   esac
 done
 
@@ -330,6 +334,42 @@ register_install() {  # register_install <kind> <path> [note]
   fi
 }
 [ -n "$GENOME_BIN" ] && register_install bin "$GENOME_BIN" "via install.sh ($installed_with)"
+
+# ── [SECTION: worktrunk] the parallel-agent worktree CLI (optional, off by default) ──
+# `wt` (worktrunk) gives each parallel agent an isolated git worktree; the agents module
+# coordinates across them (references/agents.md). It is a package-managed binary, so this
+# step delegates to the machine's own package manager — the same rule that governs genome's
+# own install: the installer bootstraps, the manager owns updates. Off by default, because
+# a user who wanted the CLI must not receive a second binary they never asked for.
+install_worktrunk() {
+  if command -v wt >/dev/null 2>&1; then
+    info "worktrunk already present: $(wt --version 2>/dev/null | head -1 || true)"
+    return 0
+  fi
+  local cmd=""
+  case "$OS" in
+    Darwin*) cmd="brew install worktrunk" ;;
+    Linux*)  case "$DISTRO" in
+               arch|manjaro|endeavouros|garuda|cachyos) cmd="sudo pacman -S --noconfirm worktrunk" ;;
+               *) cmd="cargo install worktrunk --locked" ;;
+             esac ;;
+  esac
+  if [ -z "$cmd" ]; then
+    warn "no known package manager for worktrunk on $OS/$DISTRO — install it with: cargo install worktrunk --locked"
+    return 0
+  fi
+  info "installing worktrunk: $cmd"
+  if eval "$cmd" >/dev/null 2>&1 && command -v wt >/dev/null 2>&1; then
+    info "worktrunk installed: $(wt --version 2>/dev/null | head -1 || true)"
+  else
+    # Non-fatal by construction: genome does not depend on wt. `sudo pacman` without a
+    # TTY is the common refusal — the exact command is the remedy, not a retry.
+    warn "could not install worktrunk automatically — run this yourself: $cmd"
+  fi
+}
+if [ "$SKIP_WT" = "0" ] && [ "${SKIP_WORKTRUNK:-0}" != "1" ]; then
+  install_worktrunk
+fi
 
 # The .skill-lock.json the npx `skills` CLI reads and writes. Without this entry the
 # two installers do not know about each other: `npx skills add` installs a SECOND copy

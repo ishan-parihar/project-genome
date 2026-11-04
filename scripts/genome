@@ -40,6 +40,7 @@ import math
 import os
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 import tomllib
@@ -152,7 +153,7 @@ ERR = 2
 MIN_CHUNK = 5  # lines; `ask` hits narrower than this point at a lead line without its content
 HUB_NODE_CAP = 3000  # nodes; above this `graph hubs` ranks by degree and says betweenness was not computed
 _TMP_SEQ = itertools.count()  # makes each atomic_write temp name unique within this process too
-VERSION = "2026.11.05-2"
+VERSION = "2026.11.05-3"
 # every key genome reads: an unknown key is a typo that would silently switch a check off (E017)
 CONFIG_KEYS = {
     "genome": {"modules", "schema_version"},
@@ -335,6 +336,29 @@ class Cfg:
     def ignore(self) -> set[str]:
         v = self.get("core", "pointer_ignore", "")
         return set(v.split() if isinstance(v, str) else v)
+
+    def coord_root(self) -> Path:
+        """The checkout the agents module's mutable state (boards, feed, seen marks) lives in: inside
+        a linked git worktree that is the MAIN worktree — the coordination home — so flock guards one
+        real inode, feed ids are minted once and the inbox is not per-worktree. Everywhere else it is
+        root. The main worktree is trusted only when it carries this genome's config (a submodule's or
+        bare repo's common dir does not, and a pruned main worktree must not strand the state)."""
+        if getattr(self, "_coord", None) is None:
+            home = self.root
+            if (self.root / ".git").is_file():  # a linked worktree: .git is a file into <main>/.git/worktrees/<id>
+                gitdir = sh(self.root, "git", "rev-parse", "--path-format=absolute", "--git-dir").strip()
+                common = sh(self.root, "git", "rev-parse", "--path-format=absolute", "--git-common-dir").strip()
+                main = Path(common).resolve().parent if common else None
+                if common and gitdir and common != gitdir and main \
+                        and ((main / "genome.toml").is_file() or (main / "kb.toml").is_file()):
+                    home = main
+            self._coord = home
+        return self._coord
+
+    def coord(self, p: Path) -> Path:
+        """Re-root a role path onto the coordination home (see coord_root)."""
+        home = self.coord_root()
+        return p if home == self.root else home / p.relative_to(self.root)
 
 
 def deep_merge(base: dict, more: dict) -> dict:
@@ -2621,10 +2645,16 @@ def doctor_findings(cfg: Cfg) -> tuple[list[str], list[str]]:
             if len(r) > 5 and r[2] == "ruled" and r[5] in ("", "—"):
                 finds.append(f"ruling {r[0]} not applied to its owner (genome q apply {r[0]} --applied <path>)")
     finds += running_edits(cfg)
-    d = cfg.path("workflows")
+    d = cfg.coord(cfg.path("workflows"))
     if "agents" in cfg.modules and cfg.form("workflows")[0] == "file" and d.is_dir():
         for f in sorted(d.glob("*.md")):
             info += [f"live claim {f.stem}: {r[0]} {r[3]}" for r in rows(f) if len(r) > 3 and r[1] == "in-progress"]
+    if "agents" in cfg.modules and shutil.which("wt") is None:
+        mgr = ("brew install worktrunk" if sys.platform == "darwin"
+               else "sudo pacman -S worktrunk" if Path("/etc/arch-release").exists()
+               else "winget install max-sixty.worktrunk" if sys.platform == "win32"
+               else "cargo install worktrunk --locked")
+        info.append(f"worktrunk not installed (parallel-agent worktrees): {mgr}")
     return finds, info
 
 
@@ -2699,6 +2729,9 @@ def cmd_wake(args) -> None:
     dirty = len(sh(cfg.root, "git", "status", "--porcelain").splitlines())
     print(f"# genome wake — {cfg.root.name} @ {br or '-'} {head or '-'} ({dirty} dirty) "
           f"[{', '.join(sorted(cfg.modules))}]")
+    if cfg.coord_root() != cfg.root:
+        print(f"coordination: linked worktree — boards, feed and claims live in the main checkout "
+              f"({cfg.coord_root()}); finish code with `wt merge`, commit records from the main worktree")
     cap = cfg.get("core", "wake_lines", 18)
     if cfg.has("state"):
         lines = read(cfg.path("state")).splitlines()
@@ -2751,19 +2784,20 @@ def cmd_wake(args) -> None:
     elif cfg.has("worklog"):
         print("\n## LAST WORKLOG")
         print("\n".join(read(cfg.path("worklog")).splitlines()[-3:]))
-    if "agents" in cfg.modules and cfg.has("feed"):
+    if "agents" in cfg.modules and (cfg.has("feed") or cfg.coord(cfg.path("feed")).exists()):
         aid = os.environ.get("GENOME_AGENT_ID") or os.environ.get("KB_AGENT_ID")
         if aid:
-            seen_f = cfg.root / ".genome" / f"seen-{aid}"
+            seen_f = cfg.coord(cfg.root / ".genome" / f"seen-{aid}")
             seen = read(seen_f).strip()
-            lines = read(cfg.path("feed")).splitlines()
+            feed = cfg.coord(cfg.path("feed"))
+            lines = read(feed).splitlines()
             if seen:
                 idx = next((i for i, l in enumerate(lines) if f"[{seen}]" in l), -1)
                 lines = lines[idx + 1:]
             mine = [l for l in lines if f"@{aid}" in l]
             print(f"\n## INBOX  @{aid}: {len(mine)} new")
             print("\n".join(mine[-8:]))
-            ids = re.findall(r"\*\*\[(F\d{4,})\]", read(cfg.path("feed")))
+            ids = re.findall(r"\*\*\[(F\d{4,})\]", read(feed))
             if ids:
                 seen_f.parent.mkdir(exist_ok=True)
                 seen_f.write_text(ids[-1])
@@ -3030,6 +3064,18 @@ def ignore_runtime(root: Path) -> list[str]:
     return [f".gitignore (+{', '.join(want)})"]
 
 
+def wt_hooks(root: Path) -> list[str]:
+    """When worktrunk is installed, wire its lifecycle to genome: wake on worktree start, lint
+    before a merge. No wt, or hooks already present → nothing written; a later init offers again."""
+    if shutil.which("wt") is None or (root / ".config" / "wt.toml").exists():
+        return []
+    p = root / ".config" / "wt.toml"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text("# worktrunk hooks — genome joins the wt lifecycle (project commands need first-run approval)\n"
+                 "[pre-start]\ngenome = \"genome wake\"\n\n[pre-merge]\ngenome = \"genome lint\"\n")
+    return [".config/wt.toml"]
+
+
 def cmd_init(args) -> None:
     root = Path.cwd().resolve()
     chain = bp_chain([s for a in args.blueprint or [] for s in a.split(",") if s], root)
@@ -3042,6 +3088,8 @@ def cmd_init(args) -> None:
         if chain:
             bp_preflight(cfg, chain)
         made = scaffold_roles(cfg) + ignore_runtime(root)
+        if "agents" in cfg.modules:
+            made += wt_hooks(root)
         if chain:
             made += bp_apply(root, chain)
         print(f"genome init: genome.toml kept; {len(made)} change(s): missing roles at their mapped paths, runtime ignores")
@@ -3105,6 +3153,8 @@ def cmd_init(args) -> None:
         for d in dirs.get(m, []):
             (root / d).mkdir(parents=True, exist_ok=True)
     made += ignore_runtime(root)
+    if "agents" in mods:
+        made += wt_hooks(root)
     if "records" in mods:
         cfg = find_cfg(root)
         emit_records(cfg)
@@ -4814,7 +4864,7 @@ def agent_id(args) -> str:
 def _post(cfg: Cfg, aid: str, msg: str, wf=None, to=None, reply=None) -> str | None:
     if cfg.form("feed")[0] != "file" or "agents" not in cfg.modules:
         return None
-    feed = cfg.path("feed")
+    feed = cfg.coord(cfg.path("feed"))
     feed.parent.mkdir(parents=True, exist_ok=True)
     with Guarded(feed):
         ids = [int(x) for x in re.findall(r"\*\*\[F(\d{4,})\]", read(feed))]
@@ -4829,11 +4879,11 @@ def _post(cfg: Cfg, aid: str, msg: str, wf=None, to=None, reply=None) -> str | N
 def _wf_path(cfg: Cfg, wf: str) -> Path:
     if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,40}", wf or ""):
         die(f"workflow name `{wf}` must be kebab-case")
-    return cfg.require("workflows", "genome wf") / f"{wf}.md"
+    return cfg.coord(cfg.require("workflows", "genome wf")) / f"{wf}.md"
 
 
 def _board_of(cfg: Cfg, item: str) -> Path:
-    d = cfg.path("workflows")
+    d = cfg.coord(cfg.path("workflows"))
     for f in sorted(d.glob("*.md")) if d.is_dir() else []:
         if find_row(f, item):
             return f
@@ -4860,7 +4910,7 @@ def cmd_wf(args) -> None:
             append_row(p, [f"{args.name}-{n:03d}", "open", args.item, "—", "—"], "")
         print(f"{args.name}-{n:03d} added (open)")
     else:
-        d = cfg.path("workflows")
+        d = cfg.coord(cfg.path("workflows"))
         for f in sorted(d.glob("*.md")) if d.is_dir() else []:
             rs = rows(f)
             print(f"{f.stem:24} {len(rs):3} rows, {sum(r[1] == 'open' for r in rs if len(r) > 1)} open")
@@ -4931,7 +4981,7 @@ def cmd_post(args) -> None:
 def cmd_feed(args) -> None:
     cfg = find_cfg()
     cfg.need("agents")
-    feed = cfg.require("feed", "genome feed")
+    feed = cfg.coord(cfg.require("feed", "genome feed"))
     lines = read(feed).splitlines()
     if args.since:
         idx = next((i for i, l in enumerate(lines) if f"[{args.since}]" in l), None)
@@ -5041,6 +5091,28 @@ def agents_tpl(mods: list[str], gate: str) -> str:
         rows_ += [("the stack: language, size, wiring, gate (generated)", "the `stack` zone below — `genome outline`"),
                   ("how those parts fit together, and the reading order", "`docs/OUTLINE.md`")]
     table = "\n".join(f"| {q} | {a} |" for q, a in rows_)
+    wt = ""
+    if "agents" in mods:
+        wt = """
+## Parallel agents — worktrees
+
+Several agents work this repo at once through git worktrees (`wt`, worktrunk). One agent = one
+worktree = one `GENOME_AGENT_ID`. Boards, feed and claims live in the **main worktree** (the
+coordination home) wherever you run the commands from; code stays isolated in your worktree.
+
+```bash
+export GENOME_AGENT_ID=<agent id>   # identity for claims/feed — one agent = one worktree
+wt switch -c <branch>               # your isolated checkout
+genome wake                         # orientation + inbox — works inside a worktree
+genome claim <item>                 # flock-guarded across ALL worktrees of this repo
+# … work …
+genome done <item> done --evidence <path>
+wt merge main                       # squash, rebase, merge, cleanup
+```
+
+Commit board/feed changes from the main worktree (`genome close` there); `wt merge` never touches
+them. Register claims (`claim-register`) and register transitions are main-worktree work.
+"""
     return f"""# AGENTS.md — the entry contract
 
 Orientation, the gate, and **which document owns which question**.
@@ -5067,7 +5139,7 @@ The card's `architecture` class points here until a repo names a different owner
 | question | answer lives in |
 |---|---|
 {table}
-
+{wt}
 ## Rules
 
 1. One owner per question; amend the owner, never add a second.
