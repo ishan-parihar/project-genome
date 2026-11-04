@@ -194,6 +194,19 @@ def main() -> int:
 
     print(f"\nmutation_check: {len(caught)}/{len(MUTATIONS)} mutations caught"
           + (f" — ESCAPED: {', '.join(escaped)}" if escaped else ""))
+    # PROVE THE LIVE CHECKOUT WAS NOT TOUCHED, rather than asserting it. The
+    # harness reverts files with `git checkout <ref> -- <path>`, which STAGES;
+    # a bug in the cwd binding once reverted four files in the live checkout.
+    # So the live tree's own state is captured and compared after the run.
+    live_dirty = subprocess.run(["git", "-C", str(REPO), "status", "--porcelain"],
+                                 capture_output=True, text=True).stdout.strip()
+    live_staged = subprocess.run(["git", "-C", str(REPO), "diff", "--cached", "--name-only"],
+                                  capture_output=True, text=True).stdout.strip()
+    if live_dirty or live_staged:
+        print(f"FATAL: the live checkout at {REPO} was modified by this run:\n{live_dirty}\n{live_staged}")
+        escaped.append("live-checkout-mutated")
+    else:
+        print(f"live checkout untouched (clean status, clean index): {REPO}")
     if args.keep:
         print(f"(--keep: the worktree is left at {wt})")
     else:
