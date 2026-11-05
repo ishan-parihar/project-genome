@@ -76,6 +76,7 @@ the vendored `scripts/genome`.
 | `scripts/test_package.py` | 10/10: the wheel installs, the console script and `-m` both run, byte parity, the installed-mode cases read no live machine state, and the sdist ships the files its own suites need | 2026-11-05 |
 | `scripts/test_package_modes.py` | 8/8: the sdist path, the whole command surface in installed mode, the exit codes a CI job chains on, and the Python floor | 2026-11-05 |
 | `scripts/check_docs_lint.py` | 11/11: the docs gate — a failing check fails the gate, `--staged` reports on the commit, `--json` stdout is one document | 2026-11-05 |
+| `scripts/check_suite_counts.py` | the counts in this table are derived from the code, not typed by hand — a stale `n/n` fails the gate | 2026-11-05 |
 | `scripts/check_ps1.py` | the Windows installer's structure balances and its guards match `install.sh` | 2026-11-05 |
 
 **One suite is deliberately NOT in the gate**: `scripts/mutation_check.py` reverts each fix

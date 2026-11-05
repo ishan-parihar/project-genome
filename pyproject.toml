@@ -66,6 +66,7 @@ include = [
     "scripts/test_package.py",
     "scripts/test_package_modes.py",
     "scripts/check_docs_lint.py",
+    "scripts/check_suite_counts.py",
     "scripts/check_ps1.py",
     "scripts/mutation_check.py",
     # The mutation runner that `mutation_check.py` imports. Measured 2026-11-05:
