@@ -379,7 +379,16 @@ def installer_local_source_never_breaks_a_working_install():
              env=env, cwd=str(home))
     both1 = r1.stdout + r1.stderr
     assert r1.returncode != 0, f"a checkout with no build script was accepted: {both1[-300:]}"
-    assert "build.py" in both1, f"the refusal did not say what is missing: {both1[-300:]}"
+    # Assert the SPECIFIC refusal, not the substring `build.py`. Measured
+    # 2026-11-05 by mutation-testing this case: with the no-build.py refusal
+    # deleted, the case still PASSED, because the neighbouring build call dies
+    # with "could not build $FROM_LOCAL (run scripts/build.py there and read its
+    # error)" — a different message that also contains `build.py`. So a test that
+    # asserts the substring cannot tell the two refusals apart and does not
+    # isolate this guard. Assert the refusal's own wording instead: with the
+    # guard present this passes, and with it removed no other path can satisfy it.
+    assert "--from-local needs" in both1, \
+        f"the refusal was not the no-build.py one (a different message also contains 'build.py'): {both1[-300:]}"
     assert exe.exists(), "the working install was REMOVED by a refused install"
     assert run([str(exe), "--version"]).stdout.strip() == before, "the working install changed"
 
