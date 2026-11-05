@@ -469,6 +469,14 @@ def _dispatch_upgrade(rows: list, apply: bool, roots: list | None = None) -> Non
             names = sorted({Path(r["path"]).resolve().name for r in load_installs()["installs"]})
             die("no registered install matches " + ", ".join(sorted(wanted))
                 + f" ({before} registered; `genome installs list` names them)", ERR)
+    # bin and skill rows are deliberately outside every dispatch: the installed CLI owns its
+    # own update (a reinstall — `genome upgrade` names the command), and skills roots are
+    # install.sh's publish-time job. Deliberate is not silent: name them, so an all-clear
+    # line cannot stand next to copies this dispatch never even looked at.
+    skipped = [r for r in rows if r.get("kind") not in ("vendored", "kb")]
+    if skipped:
+        print(f"note: {len(skipped)} bin/skill row(s) sit outside every dispatch — the installed CLI "
+              f"moves by reinstall (`genome upgrade` names the command), skills roots by install.sh at publish")
     targets = []
     for r in rows:
         if r.get("kind") not in ("vendored", "kb"):
@@ -508,6 +516,7 @@ def _dispatch_upgrade(rows: list, apply: bool, roots: list | None = None) -> Non
             print(f"swap source: {swap_source} ({sv})")
     ok = skipped = failed = 0
     broken_out: list[tuple] = []  # (row, old_version, reason, child_output): upgraded, but left broken
+    landed_rows: list = []        # rows whose disk re-read proved the swap landed at ref
     for r, cli, v in targets:
         cmd = [sys.executable, str(cli), "upgrade"] + (["--apply"] if apply else [])
         try:
@@ -537,7 +546,9 @@ def _dispatch_upgrade(rows: list, apply: bool, roots: list | None = None) -> Non
         # the state that must never read as green.
         if apply and res.returncode == 0:
             landed = _version_of(Path(r["path"]))
-            if landed != ref:
+            if landed == ref:
+                landed_rows.append(r)
+            else:
                 broken = broken or f"the copy is {landed} on disk, not {ref}"
         if res.returncode == 0:
             if not broken:
@@ -587,6 +598,25 @@ def _dispatch_upgrade(rows: list, apply: bool, roots: list | None = None) -> Non
             why = (out.splitlines()[0] if out else
                    "exit " + str(res.returncode) + " (no output — run it directly: " + " ".join(cmd) + ")")
             print(f"ERROR  {r['path']} — {why}")
+    if apply and landed_rows:
+        # THE REGISTRY RECORDS WHAT THE DISPATCH LANDED. The manifest row's version is a
+        # PUBLISH-TIME snapshot from registration day, and nothing refreshed it — so after
+        # every dispatch `installs verify` called every copy it had just upgraded STALE
+        # ("changed since registration"): true, and noise that drowns the row that drifted
+        # for real. This dispatch already re-read the disk (the swap is verified on land),
+        # so it is the writer that knows; it records the version it proved. `registered`
+        # stays untouched — that field answers "when did we first see this", not "when
+        # did it last change". Reload before writing: `--roots` filtered this view, and
+        # saving the filtered subset would drop the rows it excluded.
+        data = load_installs()
+        landed_paths = {r["path"] for r in landed_rows}
+        hit = 0
+        for row in data["installs"]:
+            if row["path"] in landed_paths:
+                row["version"] = ref
+                hit += 1
+        save_installs(data)
+        print(f"registry: {hit} row(s) recorded at {ref}")
     # A copy that upgraded but was left broken is its OWN category: it is not ok (the
     # KB needs a fix), not failed (the swap worked, a retry would not help), and not
     # skipped (nothing refused). Folding it into `ok` is what made a broken fleet report
@@ -723,7 +753,7 @@ def cmd_installs(args) -> None:
         if getattr(args, "against_shipped", False):
             _verify_against_shipped(rows)
             return
-        stale, broken = [], []
+        stale, broken, unreadable = [], [], []
         for r in rows:
             p = Path(r["path"])
             v = _version_of(p)
@@ -732,16 +762,27 @@ def cmd_installs(args) -> None:
             elif v == "none":
                 # a KB with no local CLI: present and legitimate, nothing to compare
                 continue
+            elif v == "?":
+                # A registered copy whose entry point carries no VERSION stamp — the measured
+                # shape is a decayed package install (the uv tool venv on this machine lost its
+                # package; the shim stayed on PATH and every invocation tracebacks). "?" against
+                # the manifest's own "?" compares equal, so the silence here is the exact silent
+                # failure this registry exists to catch. And the copy cannot doctor itself: the
+                # CLI is the thing that is broken.
+                unreadable.append((r, v))
             elif r.get("version") and r["version"] != "?" and v != r["version"]:
                 stale.append((r, v))
         for r, v in broken:
             print(f"MISSING {r['kind']} {r['path']} (was version {r.get('version', '?')})")
+        for r, v in unreadable:
+            print(f"UNREADABLE {r['kind']} {r['path']} — no VERSION stamp in the entry point; "
+                  f"the install is decayed — reinstall it (genome upgrade names the command)")
         for r, v in stale:
             print(f"STALE   {r['kind']} {r['path']} — manifest says {r['version']}, on disk {v}")
-        if not broken and not stale:
+        if not broken and not unreadable and not stale:
             print(f"verify: all {len(rows)} registered install(s) present, versions unchanged")
             return
-        die(f"{len(broken)} missing, {len(stale)} changed since registration", ERR)
+        die(f"{len(broken)} missing, {len(unreadable)} unreadable, {len(stale)} changed since registration", ERR)
     if args.installs_cmd == "scan":
         # Find installs the manifest does not know about. Skills roots come from the
         # harness conventions install.sh probes; bins from PATH; vendored copies by

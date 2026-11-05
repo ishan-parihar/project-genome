@@ -21,20 +21,27 @@ if "--check" in sys.argv:
     sys.exit(0 if out.read_text() == built else "scripts/genome is out of date: run scripts/build.py")
 out.write_text(built)
 out.chmod(0o755)
-import hashlib, re  # record the release checksum
-ver = re.search(r'^VERSION = "([^"]+)"', built, re.M).group(1)
-rel = root / "scripts" / "releases.txt"
-sha = hashlib.sha256(built.encode()).hexdigest()
-lines = rel.read_text().splitlines() if rel.exists() else []
-# A released version's checksum is a promise: `genome upgrade` compares a vendored copy against it to
-# tell a release from a hand-patched one. Rewriting that line after the fleet has vendored the build
-# makes every copy look patched. So a build that changes the bytes but not the version is refused,
-# and the fix is a version bump, not a new checksum for the same version.
-prior = next((ln.split()[1] for ln in lines if ln.startswith(ver + " ") and len(ln.split()) >= 2), None)
-if prior and prior != sha:
-    sys.exit(f"refusing: {ver} was released as {prior} and this build is {sha}.\n"
-             "A released version's checksum must not change: the fleet's vendored copies are compared\n"
-             "against it by sha, and a new checksum makes every one of them look hand-patched.\n"
-             "Bump VERSION in src/01_constants.py instead.")
-lines = [ln for ln in lines if not ln.startswith(ver + " ")]
-rel.write_text("\n".join(lines + [f"{ver} {sha}"]) + "\n")
+import hashlib, os, re  # record the release checksum
+# GENOME_NO_LEDGER=1 marks a TRANSIENT build: the artifact is built and used, but the
+# ledger must not learn its checksum, because a test build's row is a trust record for
+# bytes nobody released. Measured pollution: the live ledger carried 2026.11.05-5/-6
+# rows from harness runs that bumped VERSION on the way to a real release, and a
+# poisoned ledger is worse than an empty one — `installs verify` compares copies
+# against exactly these rows.
+if os.environ.get("GENOME_NO_LEDGER") != "1":
+    ver = re.search(r'^VERSION = "([^"]+)"', built, re.M).group(1)
+    rel = root / "scripts" / "releases.txt"
+    sha = hashlib.sha256(built.encode()).hexdigest()
+    lines = rel.read_text().splitlines() if rel.exists() else []
+    # A released version's checksum is a promise: `genome upgrade` compares a vendored copy against it to
+    # tell a release from a hand-patched one. Rewriting that line after the fleet has vendored the build
+    # makes every copy look patched. So a build that changes the bytes but not the version is refused,
+    # and the fix is a version bump, not a new checksum for the same version.
+    prior = next((ln.split()[1] for ln in lines if ln.startswith(ver + " ") and len(ln.split()) >= 2), None)
+    if prior and prior != sha:
+        sys.exit(f"refusing: {ver} was released as {prior} and this build is {sha}.\n"
+                 "A released version's checksum must not change: the fleet's vendored copies are compared\n"
+                 "against it by sha, and a new checksum makes every one of them look hand-patched.\n"
+                 "Bump VERSION in src/01_constants.py instead.")
+    lines = [ln for ln in lines if not ln.startswith(ver + " ")]
+    rel.write_text("\n".join(lines + [f"{ver} {sha}"]) + "\n")

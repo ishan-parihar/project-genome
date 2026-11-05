@@ -15,10 +15,12 @@ exit code is 1 on any failure.
 """
 import hashlib
 import os
+import re
 import shutil
 import subprocess
 import sys
 import tempfile
+import traceback
 import zipfile
 from pathlib import Path
 
@@ -36,6 +38,120 @@ def case(fn):
 
 def run(cmd, **kw):
     return subprocess.run(cmd, capture_output=True, text=True, **kw)
+
+
+# Which shipped suites can be judged from an extracted sdist, and how to tell.
+#
+# Measured 2026-11-05 from the extracted sdist, after making it a complete
+# environment (git init + commit, then build.py, then uv build):
+#
+#   build.py              exit 0
+#   check_docs_lint.py    exit 0   11/11
+#   check_ps1.py          exit 0
+#   test_genome.py        exit 0   51/51
+#   mutation_check.py     exit 1   reverts fixes by `git checkout <sha>`; an
+#                                    sdist has no history, so every mutation
+#                                    is reported ESCAPED because the REF does
+#                                    not exist
+#   test_package_modes.py exit 1   installs the artefacts and compares them
+#   test_package.py       exit 1   same
+#
+# The last three are STRUCTURAL limits of an sdist, not packaging defects:
+# a source distribution is not a checkout and does not carry build output.
+#
+# The skip is decided by BEHAVIOUR — what the suite printed — not by reading
+# the source for the word "git". An earlier version of this rule grepped the
+# text, and `check_docs_lint.py` matched: it runs `git init` on fixtures it
+# creates itself, so it does NOT need a checkout. Skipping it hid the very
+# defect the case exists for, and a mutation that changed only the quote
+# style of `DOCS = HERE / "docs"` escaped every check.
+#
+# So the question is asked of the OUTPUT: did the suite fail because a
+# HISTORICAL REF is missing, or because it needs the artefacts it installs?
+# Those are the two structural limits, and each has its own signature.
+
+
+def runnable_in_an_sdist(rel: str, result, output: str) -> bool:
+    """True when this suite's failure is NOT a packaging defect.
+
+    A suite that fails in the extracted sdist because it needs git HISTORY or
+    the built artefacts is judging something an sdist cannot provide. One that
+    fails because a file it ships is missing IS the defect this case is for.
+
+    A USAGE ERROR is also not a packaging defect: `score_readme.py` takes a
+    required `readme` positional, so running it with no arguments is asking it
+    the wrong question. It works in the sdist when given a README:
+
+        score_readme.py README.md  ->  exit 0, "Score: 4/8 [generic]"
+
+    The signature is argparse's, not the exit code: argparse exits 2 on a usage
+    error, and `docs_lint.py` ALSO exits 2 on a hard finding. The two are
+    told apart by the output — argparse prints "usage:" and "error:", the
+    gate prints "docs_lint: FAIL" and a count of hard failures.
+    """
+    if result.returncode == 0:
+        return True
+    low = output.lower()
+    # argparse usage error: the wrong question was asked, not a broken artefact
+    if "usage:" in low and "error:" in low:
+        return False
+    # mutation_check.py: `git checkout <sha>` against a ref that does not exist
+    if "invalid reference" in low or ("does not exist" in low and "checkout" in low):
+        return False
+    if "unknown revision" in low:
+        return False
+    # the packaging suites: they install dist/ and need it to be current
+    if "run `uv build` first" in low or "stale dist/" in low:
+        return False
+    return True
+
+
+def suite_path_bindings(path: Path):
+    """The repo-relative paths a suite declares as module-level Path bindings.
+
+    Read by IMPORTING the suite and inspecting its namespace, so how the path
+    was spelled does not matter — `DOCS = HERE / "docs"` and
+    `DOCS = HERE / 'docs'` are the same declaration. A regex over the source
+    missed the second form, and a mutation using it escaped the check.
+
+    `build.py` is excluded: it writes `scripts/genome` and the release
+    ledger at import time, so importing it would mutate the working tree
+    while the test is running.
+    """
+    import importlib.util
+
+    if path.name == "build.py":
+        return []
+    spec = importlib.util.spec_from_file_location("pkgprobe_" + path.stem.replace("-", "_"), path)
+    mod = importlib.util.module_from_spec(spec)
+    try:
+        spec.loader.exec_module(mod)
+    except Exception:
+        # a suite that cannot even be imported cannot be judged here
+        return []
+    out = []
+    for value in vars(mod).values():
+        if isinstance(value, Path):
+            try:
+                out.append(value.resolve())
+            except OSError:
+                continue
+    return out
+
+
+def git_tracked_paths():
+    """Every path git tracks in this repo, as repo-relative posix strings.
+
+    This is the fact the "suite needs a subject" rule is built on. A path
+    that git tracks is part of the repo's SOURCE; a path git does not track
+    is build output or scratch (`dist/`, `__pycache__/`), and an sdist is
+    not supposed to carry it. Measured 2026-11-05: `dist/` is not tracked,
+    which is why `test_package.py`'s `DIST = ROOT / "dist"` is not a
+    packaging defect and `scripts/docs/` is.
+    """
+    r = run(["git", "-C", str(ROOT), "ls-files", "-z"])
+    assert r.returncode == 0, f"git ls-files failed: {r.stderr[-300:]}"
+    return {p for p in r.stdout.split("\0") if p}
 
 
 def venv_with_wheel(name="vpkg"):
@@ -271,6 +387,173 @@ def repo_local_invocation_runs_the_source_build():
     assert out.returncode == 0, f"the repo-local invocation failed: {out.stdout[-300:]}{out.stderr[-300:]}"
     assert "genome" in out.stdout, f"unexpected output: {out.stdout.strip()!r}"
     assert "missing" not in out.stdout.lower(), f"it blamed the install instead of running: {out.stdout.strip()!r}"
+
+
+@case
+def sdist_ships_the_files_its_own_suites_need():
+    """A shipped suite must RUN from the sdist it ships in.
+
+    Measured 2026-11-05: `scripts/check_docs_lint.py` was in the sdist's
+    include list, and the two files it exists to test — `scripts/docs/docs_lint.py`
+    and `scripts/docs/docs-check.sh` — were NOT. So the sdist carried a test
+    suite whose subjects were absent, and running it there died with a
+    traceback on its first case (exit 120).
+
+    That is the silent-green direction again, one level up: the suite passed
+    11/11 in the repo, so nothing was red, and the artefact it produced was
+    broken for anyone who extracted it. A green run in the repo says nothing
+    about the artefact.
+
+    The property asserted here is general, not specific to the docs gate, and
+    it is asserted TWICE, by two independent means, because the first version
+    of this case had four separate holes in it (each recorded below).
+
+    RULE 1 — the subject rule. A suite's subject is a path that is BOTH
+      (a) TRACKED by git — it is part of the repo's SOURCE, so the sdist
+          ought to carry it; and
+      (b) bound by a module-level `Path` in a suite the sdist ships.
+
+    (a) is the fact that separates a real subject from build output.
+    `dist/` is bound by `test_package.py` and `test_package_modes.py`, but it
+    is NOT tracked: it is build output, and an sdist does not carry it.
+    `scripts/docs/` IS tracked, IS bound by `check_docs_lint.py`, and was
+    missing — that was the defect.
+
+    The bindings are read by IMPORTING each suite, so how the path was
+    spelled does not matter. A regex over the source was tried first and had
+    two holes: it matched a bare literal in a docstring, and it missed
+    `DOCS = HERE / 'docs'` — a mutation that changed only the quote style
+    ESCAPED every check in the case.
+
+    RULE 2 — the run rule. The sdist is extracted and every shipped suite is
+    RUN there. A suite that cannot pass there is a broken artefact, and the
+    exit code is the verdict.
+
+    The environment is made COMPLETE before the suites run, because an sdist
+    is not a checkout and does not carry build output. Measured 2026-11-05
+    from the extracted sdist, in this order:
+
+      git init + commit   -> a checkout to work from
+      scripts/build.py    -> rebuilds scripts/genome (exit 0)
+      uv build            -> produces dist/ (exit 0)
+
+    `build.py` runs BEFORE `uv build` because the order matters: `build.py`
+    rewrites `scripts/genome`, and `test_package_modes.py` refuses to run
+    when `dist/` is OLDER than `scripts/genome`. With that order, every
+    shipped suite passes in the extracted sdist except two, and both are
+    STRUCTURAL limits of an sdist rather than packaging defects:
+
+      mutation_check.py     reverts fixes by `git checkout <historical-sha>`,
+                            and an sdist has no history. Every mutation is
+                            reported as ESCAPED because the REF does not
+                            exist, not because the test passed.
+      test_package_modes.py refuses to run against a dist/ that is not newer
+                            than scripts/genome; uv build above satisfies
+                            that, but the suite installs the artefacts and
+                            compares them, which needs the wheel the sdist
+                            was built from.
+
+    Neither is a missing subject, so neither is what this case is about. The
+    two rules are independent: RULE 1 catches a missing subject even when
+    the suite cannot run at all, and RULE 2 catches a suite that runs but
+    fails, even when no path binding names what it needed.
+    """
+    import tarfile
+
+    # RECURSION GUARD. This case runs every shipped suite from the extracted
+    # sdist — including `test_package.py`, which ships in that sdist and
+    # contains THIS case. Without a guard the extracted copy would extract
+    # its own sdist and run its own suites again, forever.
+    #
+    # The guard is an environment variable, so it travels with the child
+    # process rather than depending on how the suite was invoked. The outer
+    # run sets it; the extracted copy sees it and skips this one case, having
+    # already been judged by the outer run.
+    if os.environ.get("GENOME_SDIST_CHECK"):
+        return
+
+    sdists = sorted(ROOT.glob("dist/project_genome-*.tar.gz"), key=lambda p: p.stat().st_mtime)
+    assert sdists, "no sdist in dist/ — run `uv build` first"
+    sd = sdists[-1]
+    with tarfile.open(sd) as tf:
+        names = {n.split("/", 1)[1] for n in tf.getnames() if "/" in n}
+    shipped = sorted(n for n in names if n.startswith("scripts/") and n.endswith(".py"))
+    assert shipped, f"the sdist ships no scripts: {sd}"
+
+    # RULE 1 — the subject rule.
+    #
+    # `scripts/docs/` is a DIRECTORY in the include list, so the check is
+    # "some file under this prefix is shipped", not "this exact path is
+    # shipped". A directory is a subject too: the suite opens files INSIDE it.
+    def shipped_path(rel: str) -> bool:
+        return rel in names or any(n.startswith(rel.rstrip("/") + "/") for n in names)
+
+    tracked = git_tracked_paths()
+
+    missing = []
+    for rel in shipped:
+        for target in suite_path_bindings(ROOT / rel):
+            # only paths INSIDE the repo are subjects of the sdist. A suite may
+            # bind a path outside it — `mutation_check.py` binds its scratch
+            # worktree under $JCODE_SCRATCH_DIR — and that is not something the
+            # sdist ships or must ship.
+            try:
+                r = target.relative_to(ROOT).as_posix()
+            except ValueError:
+                continue
+            # the repo ROOT itself is the tree, not a subject of it
+            if r in (".", ""):
+                continue
+            # not tracked: build output or scratch, not source
+            if r not in tracked and not any(t.startswith(r.rstrip("/") + "/") for t in tracked):
+                continue
+            if not shipped_path(r):
+                missing.append((rel, r))
+    assert not missing, (
+        "the sdist ships a suite whose subjects it does not ship: "
+        + "; ".join(f"{a} needs {b}" for a, b in missing)
+    )
+
+    # RULE 2 — the run rule.
+    with tempfile.TemporaryDirectory() as td:
+        with tarfile.open(sd) as tf:
+            tf.extractall(td)
+        roots = [p for p in Path(td).iterdir() if p.is_dir()]
+        assert roots, "the sdist extracted to nothing"
+        extracted = roots[0]
+
+        # make it a checkout
+        assert run(["git", "init", "-q", "."], cwd=str(extracted)).returncode == 0
+        for k, v in (("user.email", "t@t"), ("user.name", "t")):
+            run(["git", "config", k, v], cwd=str(extracted))
+        assert run(["git", "add", "-A"], cwd=str(extracted)).returncode == 0
+        assert run(["git", "commit", "-q", "-m", "sdist"], cwd=str(extracted)).returncode == 0
+
+        # rebuild the CLI, then the artefacts. The ORDER matters: build.py
+        # rewrites scripts/genome, and the packaging suites refuse to run
+        # against a dist/ older than scripts/genome.
+        b = run([sys.executable, "scripts/build.py"], cwd=str(extracted))
+        assert b.returncode == 0, f"build.py fails in the sdist:\n{b.stdout[-400:]}{b.stderr[-400:]}"
+        u = run(["uv", "build"], cwd=str(extracted))
+        assert u.returncode == 0, f"uv build fails in the sdist:\n{u.stdout[-400:]}{u.stderr[-400:]}"
+
+        for rel in shipped:
+            env = dict(os.environ)
+            env["GENOME_SDIST_CHECK"] = "1"
+            r = run([sys.executable, rel], cwd=str(extracted), env=env)
+            out = r.stdout + r.stderr
+            if not runnable_in_an_sdist(rel, r, out):
+                continue
+            # the exit code is the verdict. A suite that prints a failure and
+            # exits 0 is the defect class this whole session is about, so the
+            # exit code is asserted, not the printed line.
+            assert r.returncode == 0, (
+                f"{rel} fails when run from the sdist it ships in (exit {r.returncode}):\n{out[-600:]}"
+            )
+            # and it must not have died on a missing subject
+            assert "Traceback (most recent call last)" not in out, (
+                f"{rel} crashes when run from the sdist it ships in:\n{out[-600:]}"
+            )
 
 
 def main():

@@ -22,6 +22,8 @@ def scaffold_roles(cfg: Cfg) -> list[str]:
                 atomic_write(p / "README.md", EVIDENCE_TPL)
             elif role in dirs:
                 p.mkdir(parents=True)
+                if not any(p.iterdir()):  # git drops empty dirs: a fresh worktree then reports the role missing
+                    (p / ".gitkeep").touch()
                 if role == "archive" and cfg.get("core", "archive_form", "flat") == "flat":
                     atomic_write(p / "INDEX.md", "| date | original | reason |\n|---|---|---|\n")
             elif role in tpl:
@@ -56,6 +58,18 @@ def wt_hooks(root: Path) -> list[str]:
     return [".config/wt.toml"]
 
 
+def agents_note(root: Path) -> str | None:
+    """AGENTS.md is the hand-written contract — init keeps an existing one, never rewrites it. When
+    that file predates the agents module, the worktrunk loop never landed in it and nothing else in
+    the repo carries the protocol; say so instead of writing into the file."""
+    p = root / "AGENTS.md"
+    if p.exists() and "Parallel agents — worktrees" not in p.read_text():
+        return ("note: AGENTS.md predates the worktrunk loop — add the 'Parallel agents — worktrees' "
+                "section (export GENOME_AGENT_ID, wt switch -c, genome wake/claim/done, wt merge main; "
+                "boards, feed and claims live in the main worktree)")
+    return None
+
+
 def cmd_init(args) -> None:
     root = Path.cwd().resolve()
     chain = bp_chain([s for a in args.blueprint or [] for s in a.split(",") if s], root)
@@ -70,11 +84,14 @@ def cmd_init(args) -> None:
         made = scaffold_roles(cfg) + ignore_runtime(root)
         if "agents" in cfg.modules:
             made += wt_hooks(root)
+            note = agents_note(root)
         if chain:
             made += bp_apply(root, chain)
         print(f"genome init: genome.toml kept; {len(made)} change(s): missing roles at their mapped paths, runtime ignores")
         for m in made:
             print(f"  + {m}")
+        if "agents" in cfg.modules and note:
+            print(note)
         print("next: `genome lint --advisory`, then triage (references/adoption.md)")
         return
     mods = PROFILES[args.profile] if args.profile else ["core", *[m for m in (args.modules or "").split(",") if m]]
@@ -131,7 +148,10 @@ def cmd_init(args) -> None:
         for rel, body in files.get(m, []):
             write(rel, body)
         for d in dirs.get(m, []):
-            (root / d).mkdir(parents=True, exist_ok=True)
+            p = root / d
+            p.mkdir(parents=True, exist_ok=True)
+            if not any(p.iterdir()):  # git drops empty dirs: a fresh worktree then reports the role missing
+                (p / ".gitkeep").touch()
     made += ignore_runtime(root)
     if "agents" in mods:
         made += wt_hooks(root)
@@ -146,6 +166,8 @@ def cmd_init(args) -> None:
         print(f"  + {m}")
     for k in kept:
         print(f"  = {k} (kept)")
+    if "agents" in mods and (note := agents_note(root)):
+        print(note)
     print("next: `genome wake`; the loop is in docs/playbooks/" + chain[-1][0] + ".md" if chain and chain[-1][2]
           else "next: fill AGENTS.md (what this is, the routing table), then `genome lint`")
 

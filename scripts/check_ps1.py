@@ -140,6 +140,9 @@ def check(path: Path) -> int:
             ("--with-worktrunk", "sh", "worktrunk install step is opt-in (bash)"),
             ("[switch]$Worktrunk", "ps1", "worktrunk install step is opt-in (PowerShell)"),
             ("cargo install worktrunk --locked", "both", "worktrunk cargo fallback one-liner"),
+            # On Windows the binary is git-wt (wt.exe is Windows Terminal's own command);
+            # the doctor's missing-wt check keys on the same two names.
+            ("git-wt", "ps1", "worktrunk's Windows binary name is checked, not just wt"),
         ]
         for needle, where, label in guards:
             if where == "both":

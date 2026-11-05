@@ -68,6 +68,30 @@ include = [
     "scripts/check_docs_lint.py",
     "scripts/check_ps1.py",
     "scripts/mutation_check.py",
+    # The docs gate itself, because the suite that tests it ships in this sdist.
+    # Measured 2026-11-05: `check_docs_lint.py` was listed here but the two files
+    # it exists to test were not, so the sdist carried a suite whose subjects were
+    # absent and running it there died on its first case. A shipped suite that
+    # crashes on arrival is a broken artefact that reads green in the repo.
+    #
+    # NOTE ON HOW THIS LIST WORKS, measured 2026-11-05: a NON-EMPTY `include`
+    # list RESTRICTS the sdist to the patterns in it. An EMPTY list means
+    # "everything git tracks" — so emptying the list would ship MORE, not
+    # fewer, and the list is not decorative. It is also not a glob list: the
+    # entries are paths, and a directory entry ships the whole directory.
+    "scripts/docs/",
+    # The files README.md links to, because the sdist ships README.md AND ships
+    # the gate that checks it — and that gate FAILED on the sdist it shipped in:
+    # 4 hard D001 findings, because AGENTS.md, docs/RUNBOOK.md,
+    # docs/ARCHITECTURE.md and assets/genome-wake.png were not in the sdist.
+    # Measured 2026-11-05; the closure is 4 files, 84018 bytes, and it closes
+    # in one round with 0 findings remaining. Shipping the README without what
+    # it points at is the same defect one level up: a document that reads
+    # green in the repo and is broken for anyone who extracts it.
+    "AGENTS.md",
+    "assets/genome-wake.png",
+    "docs/ARCHITECTURE.md",
+    "docs/RUNBOOK.md",
     "src/",
     "blueprints/",
     "references/",

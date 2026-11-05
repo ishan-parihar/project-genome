@@ -77,6 +77,10 @@ def rebuild() -> None:
     """
     rel = ROOT / "scripts" / "releases.txt"
     original = rel.read_bytes()
+    # The git-restore dance below keeps the ledger honest, but the belt to its braces:
+    # a mutation rebuild is a TRANSIENT build, so the ledger must not learn its checksum
+    # at all (GENOME_NO_LEDGER is the build's own opt-out for exactly this).
+    os.environ["GENOME_NO_LEDGER"] = "1"
     try:
         sh(sys.executable, str(ROOT / "scripts" / "build.py"))
     except AssertionError:
@@ -88,6 +92,7 @@ def rebuild() -> None:
         sh(sys.executable, str(ROOT / "scripts" / "build.py"))
     finally:
         rel.write_bytes(original)
+        os.environ.pop("GENOME_NO_LEDGER", None)
 
 
 def kernel_suite(*cases):

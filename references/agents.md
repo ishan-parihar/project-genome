@@ -11,7 +11,10 @@ operational surface beneath it.
 ## Identity
 
 Each agent uses a stable id: `--agent <id>`, or `GENOME_AGENT_ID` (`KB_AGENT_ID` is still read). Every claim,
-transition and feed post is signed with it.
+transition and feed post is signed with it. The never-exported fallback is `agent-<hostname>` — one identity
+for the whole machine — so inside a linked worktree the checkout name is appended (`agent-<host>@<wt>`):
+two worktrees that both forgot the export are still two agents, and one cannot take the other's claim.
+In the main checkout the fallback stays the bare hostname.
 
 ## The protocol
 

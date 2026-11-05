@@ -5,6 +5,18 @@ def agent_id(args) -> str:
         or f"agent-{platform.node()}"
 
 
+def agent_identity(cfg: Cfg, args) -> str:
+    """agent_id, disambiguated per checkout. The same-host default (`agent-<hostname>`) is one
+    identity shared by every worktree on the machine, and a shared identity silently defeats
+    claim exclusivity — the holder check reads `held == aid` as self, so worktree B can take
+    worktree A's item without a word. An agent that never exported GENOME_AGENT_ID gets its
+    checkout name appended instead; an explicit --agent or exported id is taken as given
+    (one agent = one id is the convention the AGENTS.md block teaches)."""
+    aid = agent_id(args)
+    return aid if aid != f"agent-{platform.node()}" or cfg.coord_root() == cfg.root \
+        else f"{aid}@{cfg.root.name}"
+
+
 def _post(cfg: Cfg, aid: str, msg: str, wf=None, to=None, reply=None) -> str | None:
     if cfg.form("feed")[0] != "file" or "agents" not in cfg.modules:
         return None
@@ -64,7 +76,7 @@ def cmd_claim(args) -> None:
     cfg = find_cfg()
     cfg.need("agents")
     p = _board_of(cfg, args.item)
-    aid = agent_id(args)
+    aid = agent_identity(cfg, args)
     with Guarded(p):
         r = list(find_row(p, args.item))
         held = claim_holder(r[3] if len(r) > 3 else "")
@@ -80,19 +92,20 @@ def cmd_done(args) -> None:
     cfg = find_cfg()
     cfg.need("agents")
     p = _board_of(cfg, args.item)
+    aid = agent_identity(cfg, args)
     if args.new_status in TERMINAL and not args.evidence:
         die("terminal: --evidence names where the verdict lives")
     with Guarded(p):
         row = find_row(p, args.item)
         r = list(row) + ["—"] * (5 - len(row))
         held = claim_holder(r[3])
-        if held and held != agent_id(args):
+        if held and held != aid:
             die(f"`{args.item}` is claimed by {held} — only the holder finishes it", ERR)
         r[1] = args.new_status
         if args.new_status in TERMINAL:
             r[4] = f"[{today()}] {args.evidence}" + (f" — {args.note}" if args.note else "")
         replace_row(p, args.item, r)
-    _post(cfg, agent_id(args), f"`{args.item}` → {args.new_status}", p.stem)
+    _post(cfg, aid, f"`{args.item}` → {args.new_status}", p.stem)
     print(f"{args.item} → {args.new_status}")
 
 
@@ -100,7 +113,7 @@ def cmd_claim_register(args) -> None:
     cfg = find_cfg()
     cfg.need("agents")
     reg = cfg.require("register", "genome claim-register")
-    aid = agent_id(args)
+    aid = agent_identity(cfg, args)
     with Guarded(reg):
         row = register_find(cfg, args.id) or die(f"no register row `{args.id}`")
         r = list(row) + [""] * (4 - len(row))
@@ -118,8 +131,9 @@ def cmd_post(args) -> None:
     cfg = find_cfg()
     cfg.need("agents")
     cfg.require("feed", "genome post")
-    fid = _post(cfg, agent_id(args), args.message, args.workflow, args.to.lstrip("@") if args.to else None, args.reply)
-    print(f"feed: [{fid}] by {agent_id(args)}")
+    aid = agent_identity(cfg, args)
+    fid = _post(cfg, aid, args.message, args.workflow, args.to.lstrip("@") if args.to else None, args.reply)
+    print(f"feed: [{fid}] by {aid}")
 
 
 def cmd_feed(args) -> None:
