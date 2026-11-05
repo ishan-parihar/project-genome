@@ -55,6 +55,74 @@ tracked `genome.toml`, so every other genome command already works there unchang
 
 Resume here: nothing — implemented; the open items are the operator's (PyPI publish, fleet dispatch).
 
+## Red-team round: 2026.11.05-10 (2026-11-05)
+
+Adversarial pass over the shipped integration — a cold-start `--profile team` repo, two `git worktree add`
+checkouts, and the lifecycle end to end. What held: claim exclusivity across worktrees (exit 2 via the home),
+feed ids minted once, `done`'s holder guard, wake's coordination line, doctor's wt-missing hint, the AGENTS.md
+block in a fresh scaffold. What did not:
+
+| # | finding | fix (all in -10) |
+|---|---|---|
+| F0 | the installed CLI is OUTSIDE every dispatch (`installs upgrade` takes vendored/kb only) — on this machine it had decayed to a traceback (`uv tool` venv lost its package); `installs verify` compared "?" with "?" and said nothing | verify now prints `UNREADABLE` for versionless entry points; the dispatch names the bin/skill rows it skips; PATH genome reinstalled from the wheel (package updates stay owned by `genome upgrade`/reinstall, per installer.md) |
+| F1 | doctor's missing-wt check keyed on `wt` only — on Windows worktrunk installs as `git-wt` (`wt` is Windows Terminal) | `which("wt") or which("git-wt")` |
+| F3 | the same-host default identity `agent-<hostname>` is ONE id for every worktree: `held == aid` reads as self, so a second worktree agent that never exported `GENOME_AGENT_ID` silently TAKES the first one's claim; wake's inbox/read-marks were env-gated so they collapsed onto one file | `agent_identity(cfg, args)` — the never-exported fallback becomes `agent-<host>@<wt>` in a linked worktree (explicit ids taken as given); wake's inbox is per-checkout by default |
+| F4 | coordination degrades SILENTLY when the main checkout loses genome.toml/kb.toml (pruned main, bare repo, submodule): every guarantee is gone with zero signal | doctor prints `LOCAL coordination` when a linked worktree's `coord_root` falls back to itself |
+| F7 | a pre-existing AGENTS.md is kept by init (the law: hand-written contract) — so adoption repos never learn the wt loop | init prints a `predates the worktrunk loop` note instead of writing into the file |
+| F8 | git drops empty role dirs — every fresh worktree of a cold-start repo reported `missing role: plans/audits/…` | init/scaffold write `.gitkeep` anchors into scaffolded empty dirs |
+
+Verified live post-fix: takeover refused, feed signed `agent-omarchy@wt-b`, per-worktree INBOX without an env
+id, doctor names the LOCAL fallback, init names the stale AGENTS.md, 5 `.gitkeep`s in a team scaffold.
+
+Process notes, said plainly: the peer session released its own -4 (kinds crash-guard) mid-flight — reconciled
+into a combined **2026.11.05-10** in both loci (50/50 cases incl. their malformed-kind case, byte-identical
+kernels, one commit each: 690954a / 43f34dbe), dispatched (60 ok / 17 BROKEN pre-existing / 1 guarded skip),
+PATH genome restored to -10. While the gate ran, the peer session released -11 on top of the committed -10 —
+verified it EXTENDS this round's fixes rather than reverting any; its dispatch is its own to run. Two observed
+defects left for that line: `build.py` auto-appends ledger rows for TEST builds (releases.txt now carries
+-5/-6/-9/-41/-42 rows from harness runs — a trust ledger polluted by mutants), and the same-host default
+identity in a single (non-worktree) checkout remains one shared id, as before.
+
+## Fleet round: 2026.11.05-14 / -15 (2026-11-05)
+
+The fleet upgrade and the repair of everything the upgrade found. Two release lines ran concurrently — the
+red-team line above (-10..-12) and the source repo's own line (-11..-13) — and were merged into one kernel
+rather than raced: **-14** (byte-identical in both loci, 9396d801) and then **-15** for the one defect the
+fleet's own content found (d236f42a).
+
+What the fleet looked like before: 87 registered installs, 78 copies behind, **703 lint errors across 19
+KBs**, and 61 copies whose working tree held the shipped bytes while HEAD held the old ones — one
+`git restore` from a rollback that nothing reported.
+
+| what | before | after |
+|---|---|---|
+| registry | 78 copies behind, every upgraded row reading STALE forever | 87/87 at the shipped version; the dispatch records what it landed |
+| lint | 703 errors in 19 KBs (693 of them E309) | **0 errors** across 84 KBs (115 warnings, all advisory prose checks) |
+| git | 696 files tracked while `.gitignore` ignored them | untracked in 16 repos, each committed with a pathspec scope |
+| history | 61 copies uncommitted | committed in every repo |
+| ledger | rows for test builds (-5/-6) | `GENOME_NO_LEDGER=1` makes a transient build write no trust row |
+
+The two defects this round found in the kernel itself:
+
+- **The dispatch never recorded what it landed.** The manifest row's version was a publish-time snapshot from
+  registration day, so every copy the dispatch upgraded then read STALE ("changed since registration") —
+  true, and noise that drowned the row that drifted for real. The dispatch already re-reads the disk to prove
+  the swap landed, so it is the writer that knows: it now records the version it proved.
+- **E010 asked the ledger's question with the wrong grammar.** The register's evidence matched every
+  backticked run containing a slash, so a row citing a shell command (`cp ~/.local/bin/x && systemctl
+  --user restart x`), an API route (`GET /api/providers`) or a diff invocation was a lint error — 10 findings
+  on switchpost's register, every one of them prose. E009, the same question of the same kind of cell, used
+  the strict pointer grammar and passed. One grammar for one question: a token is a missing file only when it
+  is file-shaped, and the repo's own `pointer_ignore` applies here as it does in AGENTS.md.
+
+The repo-side fixes were what the errors named: 693 E309 by `git rm --cached` (the file stays on disk; only
+the contradiction stops), operant's plugin manifest names and switchpost's `.rs` extension into
+`pointer_ignore`, and switchpost's one undated terminal row given the `→ [date] <evidence>` marker its
+siblings carry. holon's declared local patch was re-applied by its own script after the re-vendor wiped it —
+the patch is reported as PATCHED, never as an error, and the release bytes would drop it.
+
+Gate: 52/52 kernel, 9/9 package, 8/8 modes, 11/11 docs, ps1 parity ok.
+
 ## The AGENTS.md block (P3 content)
 
 ```bash
