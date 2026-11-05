@@ -14,6 +14,7 @@ Every selected case runs even when one fails; the summary lists them all and the
 exit code is 1 on any failure.
 """
 import hashlib
+import json
 import os
 import re
 import shutil
@@ -170,6 +171,104 @@ def venv_with_wheel(name="vpkg"):
     return tmp, vpy, wheels[-1]
 
 
+def isolated_env(tmp: Path, name: str = "home") -> tuple:
+    """An environment in which the installed CLI sees NOTHING of the live machine.
+
+    A packaging suite must depend on the wheel it built, and on nothing else.
+    `genome upgrade` for an INSTALLED package compares the package against what
+    it would converge on, and `_package_reference()` probes four home-directory
+    skills roots plus every vendored row in the fleet-wide installs manifest.
+    So an un-isolated run of the installed-mode cases reads the OPERATOR'S
+    machine: measured 2026-11-05, all four roots here were at 2026.11.05-14
+    while the wheel built from this checkout was at -13, so the package
+    honestly printed "BEHIND" and the case failed.
+
+    That failure was the TEST's defect, not the product's. The product was right:
+    the package really was behind. The case asserted "up to date" — an outcome
+    that depends on the machine, not on the artefact. It was green by machine
+    state, which is the same silent-green class this suite exists to catch, one
+    level down.
+
+    BOTH inputs are isolated, and each isolation is load-bearing:
+
+      HOME            -> the four skills roots are probed through it.
+      GENOME_INSTALLS -> the fleet-wide vendored rows are read from it.
+                        `installs_manifest()` reads this variable and NOT
+                        `XDG_CONFIG_HOME`, so overriding HOME alone would still
+                        let the whole fleet's rows in.
+
+    `GENOME_SKILL` is cleared because it names a reference outright and would
+    win over everything else.
+
+    Each branch gets its OWN home, so one branch's fixture cannot be seen by
+    the next one: the reference probe takes the NEWEST candidate, and a
+    leftover fixture would silently change what a later branch compares
+    against.
+
+    Returns (env, home) so a caller can write fixtures into that home.
+    """
+    home = tmp / name
+    home.mkdir(parents=True, exist_ok=True)
+    manifest = home / "installs.json"
+    manifest.write_text(json.dumps({"schema": 1, "installs": []}))
+    env = dict(os.environ, HOME=str(home), GENOME_INSTALLS=str(manifest))
+    env.pop("GENOME_SKILL", None)
+    return env, home
+
+
+def fake_skill_root(home: Path, version: str) -> Path:
+    """A skills root under `home` carrying a given VERSION, for the comparison tests."""
+    d = home / ".agents" / "skills" / "project-genome" / "scripts"
+    d.mkdir(parents=True, exist_ok=True)
+    f = d / "genome"
+    f.write_text(f'#!/usr/bin/env python3\nVERSION = "{version}"\n')
+    return f
+
+
+def fake_vendored_row(manifest: Path, root: Path, version: str) -> Path:
+    """A vendored row in an installs manifest, pointing at a fixture copy.
+
+    This is the manifest half of the reference: `_package_reference()` reads
+    every vendored row and takes the newest. A manifest row is the ONLY way to
+    reach a reference that is not under HOME, so it is what makes the
+    GENOME_INSTALLS isolation OBSERVABLE — without such a case, a suite that
+    forgot to override the manifest would still pass whenever the live fleet
+    happened to agree with the wheel.
+
+    Measured 2026-11-05: the live fleet's vendored copies are all at or behind
+    the wheel, so reading the live manifest changed nothing on this machine.
+    That is luck, not isolation, and it is why the manifest needs its own case.
+    """
+    scripts = root / "scripts"
+    scripts.mkdir(parents=True, exist_ok=True)
+    f = scripts / "genome"
+    f.write_text(f'#!/usr/bin/env python3\nVERSION = "{version}"\n')
+    manifest.write_text(json.dumps({
+        "schema": 1,
+        "installs": [{"kind": "vendored", "path": str(root), "version": version}],
+    }))
+    return f
+
+
+def wheel_cli_version(wheel) -> str:
+    """The VERSION stamp the PACKAGED CLI carries, read from the wheel itself.
+
+    Read from the artefact rather than from `scripts/genome`, because those two
+    can disagree: the wheel in dist/ is built from whatever the tree carried at
+    build time, and the tree is rebuilt independently. Measured 2026-11-05: the
+    wheel carried -13 while the tree already carried -14.
+    """
+    import zipfile
+
+    with zipfile.ZipFile(wheel) as z:
+        names = [n for n in z.namelist() if n.endswith("/_genome.py") or n == "project_genome/_genome.py"]
+        if not names:
+            raise RuntimeError(f"the wheel does not contain project_genome/_genome.py: {z.namelist()[:8]}")
+        text = z.read(names[0]).decode(errors="replace")
+    m = re.search(r'^VERSION = "([^"]+)"', text, re.M)
+    return m.group(1) if m else ""
+
+
 def wheel_cli_bytes(wheel):
     """The packaged CLI bytes as they land in site-packages (the shipped copy)."""
     with zipfile.ZipFile(wheel) as z:
@@ -237,18 +336,141 @@ def python_dash_m_runs():
 def installed_copy_behaves_like_the_vendored_copy():
     """The site-packages copy decides what it is from its own __file__, so the
     commands that compare it to a skills copy must behave identically in both
-    modes — install says 'up to date' rather than failing on a missing skills dir."""
-    tmp, vpy, _ = venv_with_wheel("mode")
+    modes — install says 'up to date' rather than failing on a missing skills dir.
+
+    HERMETIC BY CONSTRUCTION. Measured 2026-11-05: this case used to read the
+    OPERATOR'S machine. For an installed package, `genome upgrade` compares the
+    package against what it would converge on, and that reference is probed
+    outside the package: four home-directory skills roots plus every vendored
+    row in the fleet-wide installs manifest. On this machine all four roots
+    were at 2026.11.05-14 while the wheel built from this checkout was at -13,
+    so the package honestly printed "BEHIND — this machine is at
+    2026.11.05-14" and the case failed.
+
+    The PRODUCT was right: the package really was behind. The CASE was wrong:
+    it asserted "up to date", an outcome that depends on the machine rather
+    than on the artefact. A packaging suite may depend on the wheel it built
+    and on nothing else, or it is green by machine state — which is the
+    silent-green class this whole suite exists to catch, one level down.
+
+    So the comparison is made CONTROLLABLE instead of assumed. The environment
+    is isolated (no live skills root, an empty installs manifest), and then
+    three branches are each exercised on purpose:
+
+      no reference      -> "up to date — ... no skills root on this machine
+                           to compare against"
+      reference SAME    -> "up to date (<path> is <version>)"
+      reference NEWER   -> "BEHIND — this machine is at <version>"
+
+    The third is the one that matters: it is the branch the operator saw, and
+    it must still be reachable once the live machine is out of the way. A fix
+    that made the comparison always print "up to date" would pass the old
+    assertion and be a lie, so the NEWER case is asserted here, not just the
+    comfortable one.
+    """
+    tmp, vpy, wheel = venv_with_wheel("mode")
     try:
+        env, home = isolated_env(tmp)
         proj = tmp / "proj"
         proj.mkdir()
-        init = run([str(vpy), "-m", "project_genome", "init", "--profile", "software"], cwd=str(proj))
+        init = run([str(vpy), "-m", "project_genome", "init", "--profile", "software"], cwd=str(proj), env=env)
         assert init.returncode == 0, f"init failed: {init.stderr[-400:]}"
         for cmd in (["upgrade"], ["doctor"], ["lint"]):
-            out = run([str(vpy), "-m", "project_genome", *cmd], cwd=str(proj))
+            out = run([str(vpy), "-m", "project_genome", *cmd], cwd=str(proj), env=env)
             assert out.returncode == 0, f"`{' '.join(cmd)}` failed in installed mode: {out.stdout[-400:]}{out.stderr[-400:]}"
-        up = run([str(vpy), "-m", "project_genome", "upgrade"], cwd=str(proj)).stdout
+
+        # BRANCH 1 — no reference anywhere. The installed copy has nothing to
+        # converge on, and must say so rather than claim to be current.
+        up = run([str(vpy), "-m", "project_genome", "upgrade"], cwd=str(proj), env=env).stdout
         assert "up to date" in up, f"installed mode did not report up-to-date: {up.strip()!r}"
+        assert "no skills root" in up, (
+            f"installed mode claimed to be current without naming what it compared "
+            f"against: {up.strip()!r}"
+        )
+
+        # BRANCH 2 — a reference at the SAME version is up to date, and says WHICH.
+        mine = wheel_cli_version(wheel)
+        assert mine, "the wheel carries no VERSION stamp"
+        ref = fake_skill_root(home, mine)
+        same = run([str(vpy), "-m", "project_genome", "upgrade"], cwd=str(proj), env=env).stdout
+        assert "up to date" in same, f"a same-version reference was reported as stale: {same.strip()!r}"
+        assert str(ref) in same, f"the comparison did not name the reference it used: {same.strip()!r}"
+
+        # BRANCH 3 — a reference NEWER means BEHIND. This is the branch the
+        # operator saw, and it must survive the isolation. `upgrade` never
+        # exits non-zero for an installed package: the package is a working
+        # tool, and a gate failure here would say the machine is broken when
+        # it is simply one release behind.
+        fake_skill_root(home, "9999.01.01-1")
+        behind = run([str(vpy), "-m", "project_genome", "upgrade"], cwd=str(proj), env=env)
+        assert behind.returncode == 0, (
+            f"`upgrade` exited {behind.returncode} for a stale installed package: "
+            f"{behind.stdout[-300:]}{behind.stderr[-300:]}"
+        )
+        assert "BEHIND" in behind.stdout, (
+            f"a newer reference did not produce the BEHIND verdict: {behind.stdout.strip()!r}"
+        )
+        assert "9999.01.01-1" in behind.stdout, (
+            f"the BEHIND verdict did not name the version to converge on: {behind.stdout.strip()!r}"
+        )
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+@case
+def installed_reference_is_not_read_from_the_fleet_manifest():
+    """A manifest row is the OTHER half of the installed copy's reference, and it
+    is the half that is easiest to leave un-isolated.
+
+    `_package_reference()` reads every vendored row of the installs manifest
+    and takes the newest. `installs_manifest()` reads the `GENOME_INSTALLS`
+    variable and NOT `XDG_CONFIG_HOME`, so isolating HOME alone is not enough:
+    the whole fleet's rows would still be read. Measured 2026-11-05, the live
+    fleet was at or behind the wheel, so the un-isolated run passed — luck, not
+    isolation, and exactly the kind of green-by-machine-state this suite exists
+    to catch. On any machine whose fleet leads the package, this becomes the
+    operator's BEHIND again.
+
+    So the manifest is isolated AND the isolation is exercised from BOTH sides:
+    an isolated manifest row is honoured (the manifest half of the reference
+    works), and the live manifest is not read (isolation holds).
+    """
+    tmp, vpy, wheel = venv_with_wheel("manifest")
+    try:
+        mine = wheel_cli_version(wheel)
+        assert mine, "the wheel carries no VERSION stamp"
+
+        # the manifest half of the reference works when it is OUR manifest
+        env, home = isolated_env(tmp, "own")
+        proj = tmp / "proj"
+        proj.mkdir()
+        init = run([str(vpy), "-m", "project_genome", "init", "--profile", "software"], cwd=str(proj), env=env)
+        assert init.returncode == 0, f"init failed: {init.stderr[-300:]}"
+        row = fake_vendored_row(home / "installs.json", tmp / "fleetrepo", mine)
+        same = run([str(vpy), "-m", "project_genome", "upgrade"], cwd=str(proj), env=env)
+        assert same.returncode == 0, f"upgrade failed: {same.stdout[-300:]}{same.stderr[-300:]}"
+        assert "up to date" in same.stdout, (
+            f"a manifest row at the same version was not read: {same.stdout.strip()!r}"
+        )
+        assert str(row) in same.stdout, (
+            f"the reference was read from somewhere other than the manifest row: {same.stdout.strip()!r}"
+        )
+
+        # and the LIVE manifest must not be read: a row that leads the package
+        # is written into the isolated manifest, and the live fleet — which on
+        # this machine sits behind the wheel — cannot supply it.
+        led = fake_vendored_row(home / "installs.json", tmp / "fleetlead", "9999.01.01-1")
+        behind = run([str(vpy), "-m", "project_genome", "upgrade"], cwd=str(proj), env=env)
+        assert behind.returncode == 0, (
+            f"`upgrade` exited {behind.returncode} for a stale installed package: "
+            f"{behind.stdout[-300:]}{behind.stderr[-300:]}"
+        )
+        assert "BEHIND" in behind.stdout, (
+            f"a manifest row at a newer version produced no BEHIND verdict: {behind.stdout.strip()!r}"
+        )
+        assert str(led) in behind.stdout, (
+            f"the BEHIND reference was not the manifest row: {behind.stdout.strip()!r}"
+        )
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
