@@ -2884,6 +2884,90 @@ def register_evidence_grammar(root: Path) -> None:
     assert "E010" not in out3, ("pointer_ignore did not reach the register's evidence:\n" + out3)
 
 
+@case
+def append_only_publication_rule(root: Path) -> None:
+    """The append-only check judges a REMOVED line against what was PUBLISHED.
+
+    Four cases, each one a real defect the old net-diff-over-a-window rule got wrong.
+    Every case goes through the PUBLIC interface (`genome log` publishes, `doctor`
+    judges), so the check is exercised as a user meets it.
+
+      1. A COMPLIANT REPAIR is silent.  A line published by an append, then rewritten
+         in place (a violation), then RESTORED with the correction appended after it:
+         the original is present now, so nothing is reported.
+      2. A REAL VIOLATION is reported, even in a file ADDED after the window's base —
+         the case a net diff over the window could not see at all.
+      3. Removing REPLACEMENT TEXT (a line an in-place rewrite introduced) is the
+         REPAIR of that rewrite, not a second violation, so it is silent.
+      4. An unrelated APPEND is silent (the ordinary case: the check must not cry wolf).
+    """
+    full_repo(root)
+    wl = root / "docs/kb/WORKLOG.md"
+    entry1 = run(root, "log", "published entry one").stdout
+    git(root, "add", "-A"); git(root, "commit", "-qm", "publish one")
+
+    # (4) an ordinary append is silent.
+    run(root, "log", "published entry two")
+    git(root, "add", "-A"); git(root, "commit", "-qm", "append two")
+    out = run(root, "doctor").stdout
+    assert "append-only violation" not in out, ("an ordinary append was reported:\n" + out)
+
+    # (1) a compliant repair: rewrite the published line in place (the violation),
+    # then restore the original and append the correction after it.
+    text = wl.read_text()
+    wl.write_text(text.replace("published entry one", "published entry one REWRITTEN"))
+    git(root, "add", "-A"); git(root, "commit", "-qm", "illegal rewrite")
+    wl.write_text(text.replace("published entry one", "published entry one")
+                  + "- **2026-11-05T00:00** — entry one AMENDED: the correction\n")
+    git(root, "add", "-A"); git(root, "commit", "-qm", "compliant repair")
+    out = run(root, "doctor").stdout
+    assert "append-only violation" not in out, ("a compliant repair was reported:\n" + out)
+
+    # (2) a real violation in a file ADDED after the base: the published line is
+    # gone and never restored.  This is the case a net diff over a window missed.
+    t = (root / "genome.toml").read_text()
+    (root / "genome.toml").write_text(t.replace('worklog = "docs/kb/WORKLOG.md"',
+                                                 'worklog = "docs/kb/EXTRA.md"'))
+    git(root, "add", "-A"); git(root, "commit", "-qm", "point the role at a new file")
+    run(root, "log", "published entry three")
+    git(root, "add", "-A"); git(root, "commit", "-qm", "publish three")
+    extra = root / "docs/kb/EXTRA.md"
+    extra.write_text(extra.read_text().replace("published entry three", "replacement text"))
+    git(root, "add", "-A"); git(root, "commit", "-qm", "rewrite it away")
+    out = run(root, "doctor", ok=False).stdout
+    assert "append-only violation" in out, ("a real violation was not reported:\n" + out)
+    assert "EXTRA.md" in out, ("the violation did not name the file:\n" + out)
+
+    # (3) removing REPLACEMENT TEXT is the repair of the illegal rewrite: silent.
+    (root / "genome.toml").write_text((root / "genome.toml").read_text()
+                                      .replace('worklog = "docs/kb/EXTRA.md"',
+                                               'worklog = "docs/kb/WORKLOG.md"'))
+    git(root, "add", "-A"); git(root, "commit", "-qm", "point the role back")
+    extra.write_text("- **2026-11-05T00:00** — published entry three\n")
+    git(root, "add", "-A"); git(root, "commit", "-qm", "restore the published line")
+    out = run(root, "doctor").stdout
+    assert "append-only violation" not in out, ("the restored repair was reported:\n" + out)
+
+
+@case
+def append_only_repair_in_working_tree(root: Path) -> None:
+    """The working-tree check is publication-aware too: restoring a published line
+    in the working tree is the compliant repair, and it must be silent."""
+    full_repo(root)
+    wl = root / "docs/kb/WORKLOG.md"
+    run(root, "log", "published entry one")
+    git(root, "add", "-A"); git(root, "commit", "-qm", "publish")
+    # a working-tree removal of a published line IS a violation
+    text = wl.read_text()
+    wl.write_text(text.replace("published entry one", "replacement text"))
+    out = run(root, "doctor", ok=False).stdout
+    assert "append-only violation" in out, ("a working-tree removal was not reported:\n" + out)
+    # restoring it is the repair: silent
+    wl.write_text(text)
+    out = run(root, "doctor").stdout
+    assert "append-only violation" not in out, ("the repair was reported:\n" + out)
+
+
 def main() -> None:
     names = sys.argv[1:] or list(CASES)
     unknown = [n for n in names if n not in CASES]

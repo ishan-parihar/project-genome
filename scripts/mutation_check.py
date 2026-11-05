@@ -219,6 +219,13 @@ MUTATIONS = [
      "install.sh", "HEAD", False, modes_suite,
      ("installer_local_source_never_breaks_a_working_install",),
      install_sh_mutation("prebuild-unreachable")),
+    # The append-only rule.  aa4b44b holds the net-diff-over-a-window check, which
+    # reported a COMPLIANT REPAIR as a violation (the window's base could itself be
+    # the violating commit) and could not see an in-place edit inside a file added
+    # after that base.  The publication-aware rule fixes both.
+    ("append-only-publication-rule",
+     "src/10_doctor.py", "aa4b44b", True, kernel_suite,
+     ("append_only_publication_rule", "append_only_repair_in_working_tree")),
 ]
 
 
