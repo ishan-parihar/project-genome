@@ -2968,6 +2968,44 @@ def append_only_repair_in_working_tree(root: Path) -> None:
     assert "append-only violation" not in out, ("the repair was reported:\n" + out)
 
 
+@case
+def append_only_merge_resolution(root: Path) -> None:
+    """A removal introduced ONLY by a MERGE is still a removal.
+
+    `git log -p` omits a merge's diff by default, so a published line dropped by
+    a merge's conflict resolution — and by no branch commit — was invisible to
+    the check.  Measured 2026-11-05: 0 violations without the flag, 1 with
+    `--diff-merges=first-parent`.
+    """
+    full_repo(root)
+    wl = root / "docs/kb/WORKLOG.md"
+    run(root, "log", "published entry one")
+    git(root, "add", "-A"); git(root, "commit", "-qm", "publish")
+
+    # A branch that appends, and a main that appends too, so the merge can
+    # resolve the file to KEEP NEITHER of the original lines.
+    git(root, "checkout", "-q", "-b", "side")
+    run(root, "log", "side entry")
+    git(root, "add", "-A"); git(root, "commit", "-qm", "side appends")
+    git(root, "checkout", "-q", "-")
+    run(root, "log", "main entry")
+    git(root, "add", "-A"); git(root, "commit", "-qm", "main appends")
+
+    # Merge and resolve the file by hand: the published line is dropped by the
+    # MERGE and by no branch commit.
+    subprocess.run(["git", "merge", "--no-commit", "side"], cwd=root, capture_output=True)
+    text = wl.read_text()
+    kept = [ln for ln in text.splitlines() if "published entry one" not in ln]
+    wl.write_text("\n".join(kept) + "\n")
+    git(root, "add", "-A")
+    subprocess.run(["git", "commit", "-q", "-m", "merge side: the resolution drops the published line"],
+                   cwd=root, capture_output=True)
+
+    out = run(root, "doctor", ok=False).stdout
+    assert "append-only violation" in out, ("a merge-only removal was not reported:\n" + out)
+    assert "WORKLOG.md" in out, ("the violation did not name the file:\n" + out)
+
+
 def main() -> None:
     names = sys.argv[1:] or list(CASES)
     unknown = [n for n in names if n not in CASES]

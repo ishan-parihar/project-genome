@@ -35,6 +35,7 @@ HERE = Path(__file__).resolve().parent
 REPO = HERE.parent
 sys.path.insert(0, str(HERE))
 import mutation_install_sh  # noqa: E402  (needs HERE on the path first)
+import mutation_append_only  # noqa: E402  (same)
 SCRATCH = Path(os.environ.get("JCODE_SCRATCH_DIR") or tempfile.gettempdir()) / "genome-mutation"
 ROOT = REPO          # rebound to the worktree by main()
 
@@ -179,6 +180,20 @@ def install_sh_mutation(name):
     return apply
 
 
+def append_only_mutation(name):
+    """The MUTATION for the merge half of the append-only rule.
+
+    `--diff-merges=first-parent` and the guard that needs it arrived together,
+    so there is no pre-fix commit to revert to; the mutation removes the flag,
+    which is what scripts/mutation_append_only.py does.  Same shape as
+    install_sh_mutation, and for the same reason: the MUTATION is returned, not
+    a mutate-and-run bundle, so the control phase stays a plain run.
+    """
+    def apply():
+        mutation_append_only.mutate_append_only(ROOT, name)
+    return apply
+
+
 # (name, file to revert, ref holding the PRE-FIX version, needs rebuild, runner, cases)
 #
 # Each entry may carry a 7th element: an EXTRA mutation to apply on top of the
@@ -226,6 +241,14 @@ MUTATIONS = [
     ("append-only-publication-rule",
      "src/10_doctor.py", "aa4b44b", True, kernel_suite,
      ("append_only_publication_rule", "append_only_repair_in_working_tree")),
+    # The merge half of the same rule.  A removal introduced ONLY by a merge's
+    # conflict resolution is invisible without --diff-merges=first-parent, and
+    # that flag arrived with the guard, so there is no pre-fix commit to revert
+    # to.  See scripts/mutation_append_only.py.
+    ("append-only-merge-diff",
+     "src/10_doctor.py", "HEAD", True, kernel_suite,
+     ("append_only_merge_resolution",),
+     append_only_mutation("merge-diff-blind")),
 ]
 
 

@@ -82,13 +82,25 @@ def _append_only_hunks(root: Path, rel: str) -> list[tuple[str, str, list[list[t
 
     A hunk is a list of (kind, line) pairs with kind "+" or "-"; context lines are
     dropped.  Renames are followed, so a renamed entry keeps its history.
+
+    MERGES ARE INCLUDED.  `git log -p` omits a merge's diff by default, so a
+    removal introduced ONLY by a merge's conflict resolution was invisible —
+    measured 2026-11-05: a published line dropped by the merge and by no branch
+    commit yielded 0 violations, and `--diff-merges=first-parent` yields 1.
+    The flag is added only if this git understands it (it landed in git 2.31),
+    so an older git still gets a working check rather than an error.
     """
-    out = subprocess.run(
-        ["git", "log", "--reverse", "--format=@@@COMMIT %H %s", "-p", "--no-color",
-         "--find-renames", "--follow", "--", rel],
-        cwd=root, capture_output=True, text=True, timeout=60)
-    if out.returncode != 0:
-        return []
+    args = ["git", "log", "--reverse", "--format=@@@COMMIT %H %s", "-p", "--no-color",
+            "--find-renames", "--follow"]
+    probe = subprocess.run(args + ["--diff-merges=first-parent", "--", rel],
+                           cwd=root, capture_output=True, text=True, timeout=60)
+    if probe.returncode == 0:
+        out = probe
+    else:
+        out = subprocess.run(args + ["--", rel],
+                             cwd=root, capture_output=True, text=True, timeout=60)
+        if out.returncode != 0:
+            return []
     commits: list[tuple[str, str, list[list[tuple[str, str]]]]] = []
     sha = subj = None
     hunks: list[list[tuple[str, str]]] = []

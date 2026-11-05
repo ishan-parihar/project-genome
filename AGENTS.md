@@ -62,7 +62,7 @@ derived structural zone gated against drift). A small app needs `core`; the rest
 ## Gate
 
 ```
-python3 scripts/test_genome.py     # 52/52 suites: the CLI, against a scratch copy
+python3 scripts/test_genome.py     # 55/55 suites: the CLI, against a scratch copy
 ```
 
 The `[core] gate` here is `pytest -q`, but **`pytest` has nothing to collect** — the
@@ -72,7 +72,7 @@ the vendored `scripts/genome`.
 
 | suite | what it proves | last measured |
 |---|---|---|
-| `scripts/test_genome.py` | 52/52 cases: the CLI against a scratch copy, never your project | 2026-11-05 |
+| `scripts/test_genome.py` | 55/55 cases: the CLI against a scratch copy, never your project | 2026-11-05 |
 | `scripts/test_package.py` | 10/10: the wheel installs, the console script and `-m` both run, byte parity, the installed-mode cases read no live machine state, and the sdist ships the files its own suites need | 2026-11-05 |
 | `scripts/test_package_modes.py` | 8/8: the sdist path, the whole command surface in installed mode, the exit codes a CI job chains on, and the Python floor | 2026-11-05 |
 | `scripts/check_docs_lint.py` | 11/11: the docs gate — a failing check fails the gate, `--staged` reports on the commit, `--json` stdout is one document | 2026-11-05 |
@@ -85,7 +85,7 @@ is too slow and too side-effecting for a gate that runs before every push. Run i
 after changing a check or a fix:
 
 ```
-python3 scripts/mutation_check.py    # 7/7 mutations caught; exit 0
+python3 scripts/mutation_check.py    # 11/11 mutations caught; exit 0
 ```
 
 It runs in its own worktree and proves the live checkout came through untouched.
