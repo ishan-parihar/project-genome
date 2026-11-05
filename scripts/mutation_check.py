@@ -156,7 +156,7 @@ def ensure_dist_built():
 
 
 def install_sh_mutation(name):
-    """A runner that FIRST applies an install.sh mutation, then runs the case.
+    """The MUTATION for one of the two V-111 install.sh guards.
 
     The repo's MUTATIONS list expresses a mutation as a git revert to a commit
     holding the pre-fix file. The two V-111 install.sh guards were ADDED, so no
@@ -164,16 +164,26 @@ def install_sh_mutation(name):
     those, the equivalent is a small edit that removes the guard while leaving
     the script parseable, which is what scripts/mutation_install_sh.py does.
 
+    This returns the MUTATION ITSELF, not a runner that applies it and then
+    runs the suite. That separation is load-bearing: the control phase calls
+    the plain runner, so a bundled mutate-and-run would make the "control" a
+    second mutation — which is exactly the bug measured on 2026-11-05, when
+    the control for both install.sh mutations FAILED and the harness correctly
+    refused to claim a catch.
+
     The mutation is applied to the THROWAWAY worktree (ROOT), never to the live
     checkout, and the caller's finally-block restores the file byte for byte.
     """
-    def run(*cases):
+    def apply():
         mutation_install_sh.mutate(ROOT, name)
-        return modes_suite(*cases)
-    return run
+    return apply
 
 
 # (name, file to revert, ref holding the PRE-FIX version, needs rebuild, runner, cases)
+#
+# Each entry may carry a 7th element: an EXTRA mutation to apply on top of the
+# git revert. It is a callable, not a runner, so the control phase can run the
+# plain suite and the mutation phase can apply it.
 #
 # Each ref was verified by reading the code at that commit, not by a grep count:
 #   85e3ec6  pre-72: prints `lint: clean [...]` with no `(filtered)`, and the
@@ -202,11 +212,13 @@ MUTATIONS = [
     # commit to revert to; the ref is the CURRENT commit (a no-op restore) and
     # the mutation is applied by the runner. See scripts/mutation_install_sh.py.
     ("install-sh-no-build-py-refusal",
-     "install.sh", "HEAD", False, install_sh_mutation("no-build-py-refusal"),
-     ("installer_local_source_never_breaks_a_working_install",)),
+     "install.sh", "HEAD", False, modes_suite,
+     ("installer_local_source_never_breaks_a_working_install",),
+     install_sh_mutation("no-build-py-refusal")),
     ("install-sh-prebuild-unreachable",
-     "install.sh", "HEAD", False, install_sh_mutation("prebuild-unreachable"),
-     ("installer_local_source_never_breaks_a_working_install",)),
+     "install.sh", "HEAD", False, modes_suite,
+     ("installer_local_source_never_breaks_a_working_install",),
+     install_sh_mutation("prebuild-unreachable")),
 ]
 
 
@@ -267,7 +279,7 @@ def main() -> int:
     # measure.
     print("control: running each mutation's own test UNMUTATED, in this worktree")
     bad_control = []
-    for name, path, ref, needs_build, runner, cases in MUTATIONS:
+    for name, path, ref, needs_build, runner, cases, *extra in MUTATIONS:
         original = (ROOT / path).read_bytes()
         try:
             rc, out = runner(*cases)
@@ -294,13 +306,15 @@ def main() -> int:
         return 2
 
     escaped, caught = [], []
-    for name, path, ref, needs_build, runner, cases in MUTATIONS:
+    for name, path, ref, needs_build, runner, cases, *extra in MUTATIONS:
         # the fixed state, captured so the restore is exact
         original = (ROOT / path).read_bytes()
         try:
             restore(ref, path)
             if needs_build:
                 rebuild()
+            for apply in extra:
+                apply()
             rc, out = runner(*cases)
             if rc == 0:
                 escaped.append(name)
