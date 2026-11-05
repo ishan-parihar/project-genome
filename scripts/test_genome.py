@@ -3156,7 +3156,26 @@ def unpushed_vendored_cli(root: Path) -> None:
       5. the REMOTE is ahead of the local checkout -> not reported, because every
          local commit is already on the remote's history;
       6. the repo has no remote at all -> not reported, because it is unversioned
-         rather than unpushed."""
+         rather than unpushed;
+      7. the remote is ahead and the local checkout has not heard -> not reported,
+         because a remote holding commits this checkout has not seen is not a
+         local commit the remote has not been told about;
+      8. the remote's URL cannot be reached -> STILL reported, because the answer
+         comes from this machine's own history;
+      9. the branch has NO upstream of its own -> still reported, because the
+         tracking ref must still be resolved from the remote;
+     10. the comparison cannot be MADE (HEAD is unborn) -> reported as "cannot be
+         decided", because a measurement that could not be taken is not a pass;
+     11. the detail says HOW MANY commits are unpushed;
+     12. the branch tracks a NON-DEFAULT remote branch -> the count is taken
+         against the branch's OWN upstream, not the remote's default branch.
+
+    States 9, 10, 11 and 12 were NOT in the first version of this case. The
+    mutation harness found them: removing the upstream branch of the ref
+    resolution, and turning the "cannot be decided" branch into a silent pass,
+    and dropping the count from the detail, and comparing against the remote's
+    default branch instead of the branch's own upstream - all four ESCAPED the
+    case as it was written."""
     remote = root / "remote.git"
     _git(root, "init", "-q", "--bare", str(remote))
     repo = root / "repo"
@@ -3220,20 +3239,59 @@ def unpushed_vendored_cli(root: Path) -> None:
     assert "not on github" in found, (
         f"the detail did not name the remote the branch actually pushes to: {found}")
 
-    # ---- 4. the remote does not answer ----
-    # A remote that cannot be reached is a measurement that could NOT be taken. It
-    # must not read as clean: that is the silent-green class this project exists to
-    # catch, and it is the one place where "I could not check" and "it is fine" are
-    # the same output.
-    broken = root / "broken.git"
-    _git(root, "init", "-q", "--bare", str(broken))
-    _git(repo, "remote", "set-url", "github", str(root / "does-not-exist.git"))
-    found = _unpushed_through_cli(repo, env)
+    # ---- 4. the remote has NEVER been fetched or pushed to ----
+    # A remote with no tracking ref means this checkout has never told it
+    # anything and has never heard from it. What it holds is UNKNOWN, and
+    # unknown is not clean: reporting this as pushed would be a measurement
+    # that could not be taken reading as a pass.
+    #
+    # The FIRST version of this case made the remote unreachable and asserted
+    # the detail said so. That state has no meaning under the local design -
+    # the remote's reachability is not consulted at all - so the case was
+    # asserting an implementation detail that the fix deliberately removed.
+    # The state that DOES matter is the one where the local checkout has never
+    # contacted the remote, and there the verdict must be "cannot be decided".
+    #
+    # THE MANIFEST IS RESTORED BEFORE THE NEXT STATE. This state registers its
+    # own repo, and the states after it read the registry to find the repo they
+    # are about. The first version of this block left the registry pointing at
+    # THIS repo, so the next state's assertion read the wrong registry and
+    # failed with a message about the wrong repo entirely - a test defect that
+    # looked like a product defect.
+    never = root / "never"
+    never.mkdir()
+    _git(never, "init", "-q")
+    _git(never, "config", "user.email", "t@t")
+    _git(never, "config", "user.name", "t")
+    (never / "scripts").mkdir()
+    shutil.copyfile(G, never / "scripts/genome")
+    _git(never, "add", "-A")
+    _git(never, "commit", "-qm", "genome: commit the vendored CLI")
+    # The remote is configured but NEVER contacted: no push, no fetch, so no
+    # local tracking ref exists for it.
+    _git(never, "remote", "add", "origin", str(root / "never-seen.git"))
+    manifest.write_text(json.dumps({
+        "schema": 1,
+        "installs": [
+            {"kind": "vendored", "path": str(never), "version": "?"},
+            {"kind": "skill", "path": str(root / "skill"), "version": "?"},
+        ],
+    }))
+    found = _unpushed_through_cli(never, env)
     assert found is not None, (
-        "a remote that did not answer was reported as clean — a measurement that could "
-        "not be taken must never read as a pass")
-    assert "did not answer" in found, (
-        f"the detail did not say the remote was unreachable: {found}")
+        "a remote this checkout has never contacted was reported as clean - what the "
+        "remote holds is UNKNOWN, and a measurement that could not be taken must "
+        "never read as a pass")
+    assert "cannot be decided" in found, (
+        f"the detail did not say the answer could not be decided: {found}")
+    # The registry goes back to the repo the remaining states are about.
+    manifest.write_text(json.dumps({
+        "schema": 1,
+        "installs": [
+            {"kind": "vendored", "path": str(repo), "version": "?"},
+            {"kind": "skill", "path": str(root / "skill"), "version": "?"},
+        ],
+    }))
 
     # ---- 5. the REMOTE is ahead of the local checkout ----
     # Someone else pushed. The local HEAD is older, but every local commit IS on
@@ -3286,10 +3344,10 @@ def unpushed_vendored_cli(root: Path) -> None:
         "a repo whose REMOTE is ahead of the local checkout was reported as unpushed — "
         "every local commit is on the remote's history, so there is nothing to push")
 
-    # ---- 6. a vendored row whose repo has NO remote ----
     # A repo with no remote is not unpushed, it is unversioned. It is committed and
     # clean and there is nowhere to push to, and calling that unpushed would put
     # every offline KB on the list.
+    # ---- 6. a vendored row whose repo has NO remote ----
     noremote = root / "noremote"
     noremote.mkdir()
     _git(noremote, "init", "-q")
@@ -3313,12 +3371,21 @@ def unpushed_vendored_cli(root: Path) -> None:
         "a repo with no remote at all was reported as unpushed — it is unversioned, "
         "not unpushed, and there is nowhere for it to push to")
 
-    # ---- 7. the remote's commit is NOT in this checkout ----
-    # A repo whose local objects predate the remote's tip: `merge-base` cannot
-    # find the remote's commit and exits 128, not 1. That is a measurement that
-    # COULD NOT BE TAKEN, and it must not read as "not an ancestor" — which would
-    # report the repo as unpushed when its commits may all be on the remote. It
-    # must say the answer could not be decided.
+    # ---- 7. the remote is ahead of the local checkout, and the local checkout
+    #          has not heard about it ----
+    # The collaborator pushes a commit the local checkout has never seen, and
+    # the local repo is NOT fetched. The local tracking ref still holds the last
+    # state this checkout actually pushed, and HEAD is exactly that - so there
+    # is NO local commit the remote has not been told about.
+    #
+    # The FIRST version of this case asserted the verdict was "cannot be
+    # decided", because it compared HEAD against the LIVE remote's sha, which
+    # the local object store did not have. Under the local design that state
+    # cannot arise: the comparison is always against a ref whose object IS
+    # local. And the verdict is now not merely different but RIGHT - a remote
+    # holding commits this checkout has not seen is not a local commit the
+    # remote has not been told about, which is exactly the distinction state 5
+    # draws.
     unknown_remote = root / "unknown.git"
     _git(root, "init", "-q", "--bare", str(unknown_remote))
     fresh = root / "fresh"
@@ -3327,13 +3394,13 @@ def unpushed_vendored_cli(root: Path) -> None:
     _git(fresh, "config", "user.email", "t@t")
     _git(fresh, "config", "user.name", "t")
     (fresh / "scripts").mkdir()
-    shutil.copyfile(G, fresh / "scripts" / "genome")
+    shutil.copyfile(G, fresh / "scripts/genome")
     _git(fresh, "add", "-A")
     _git(fresh, "commit", "-qm", "genome: commit the vendored CLI")
     _git(fresh, "remote", "add", "origin", str(unknown_remote))
     _git(fresh, "push", "-q", "origin", "HEAD:refs/heads/main")
-    # The collaborator pushes a commit the local checkout has never seen, and the
-    # local repo is NOT fetched — so the remote's HEAD object is absent locally.
+    # The collaborator pushes a commit the local checkout has not seen, and the
+    # local repo is NOT fetched - so the remote's tip is absent locally.
     _git(other, "remote", "set-url", "origin", str(unknown_remote))
     _git(other, "fetch", "-q", "origin")
     _git(other, "reset", "-q", "--hard", "origin/main")
@@ -3348,14 +3415,293 @@ def unpushed_vendored_cli(root: Path) -> None:
     }))
     out = subprocess.run([sys.executable, G, "installs", "verify", "--against-shipped"],
                          cwd=repo, capture_output=True, text=True, env=env)
-    assert str(fresh) in out.stdout, (
-        "the fixture did not produce the state it claims: the repo whose remote's "
-        f"commit is absent locally was not reported at all:\n{out.stdout}")
-    assert "cannot be decided" in out.stdout, (
-        "a repo whose remote's commit is absent locally was reported as unpushed — "
-        "whether the commit is pushed CANNOT be decided, and a measurement that could "
-        f"not be taken must never read as a verdict:\n{out.stdout}")
+    assert str(fresh) not in out.stdout, (
+        "a repo whose REMOTE is ahead of it was reported as unpushed - the remote "
+        "holding commits this checkout has not seen is not a local commit the remote "
+        f"has not been told about:\n{out.stdout}")
 
+    # ---- 8. the remote's URL cannot be reached, and the check still answers ----
+    # THE POINT OF THE WHOLE FIX. The check asks a question about this machine's
+    # history, and it answers it from the local tracking ref - so it must not
+    # need the remote to answer at all.
+    #
+    # Measured 2026-11-05, the first version of this check asked the LIVE
+    # remote (`git ls-remote`), and that cost 58.75s of network across the
+    # fleet against 0.63s for every local git call combined. Worse, with the
+    # remotes unreachable it hit a 60s timeout PER REPO: 49 MINUTES for the
+    # estate. A check that takes 49 minutes offline does not run, so it sees
+    # nothing.
+    #
+    # The URL below points at a path that does not exist, so `git ls-remote`
+    # fails INSTANTLY rather than hanging - which means a regression that
+    # reintroduced the network call would fail this case with a DIFFERENT
+    # message ("did not answer") rather than by timing out, and the failure
+    # would be fast and legible.
+    #
+    # THE REPO MUST HAVE A TRACKING REF, or the verdict is the OTHER unknown -
+    # "never been fetched or pushed to" - and state 4 already covers that. The
+    # point here is a repo that HAS told the remote about its commits and whose
+    # remote is now unreachable: the answer is still known, from this machine.
+    offline = root / "offline"
+    offline.mkdir()
+    _git(offline, "init", "-q")
+    _git(offline, "config", "user.email", "t@t")
+    _git(offline, "config", "user.name", "t")
+    (offline / "scripts").mkdir()
+    shutil.copyfile(G, offline / "scripts/genome")
+    _git(offline, "add", "-A")
+    _git(offline, "commit", "-qm", "genome: commit the vendored CLI")
+    # Push once to a REAL bare remote, so the local tracking ref exists and
+    # records what the remote was last told.
+    reachable = root / "reachable.git"
+    _git(root, "init", "-q", "--bare", str(reachable))
+    _git(offline, "remote", "add", "origin", str(reachable))
+    _git(offline, "push", "-q", "origin", "HEAD:refs/heads/main")
+    # Then the remote becomes unreachable: the URL now points at a path that
+    # does not exist. The tracking ref survives, because it is LOCAL.
+    _git(offline, "remote", "set-url", "origin", str(root / "no-such-remote.git"))
+    # And one more commit the remote never heard about.
+    _git(offline, "commit", "-q", "--allow-empty", "-m", "a commit the remote never got")
+    manifest.write_text(json.dumps({
+        "schema": 1,
+        "installs": [
+            {"kind": "vendored", "path": str(offline), "version": "?"},
+            {"kind": "skill", "path": str(root / "skill"), "version": "?"},
+        ],
+    }))
+    found = _unpushed_through_cli(offline, env)
+    assert found is not None, (
+        "a repo with an unreachable remote and an unpushed local commit was NOT "
+        "reported - the answer comes from this machine's own history and does not "
+        "need the remote to answer")
+    assert "not on origin" in found, (
+        f"the detail did not name the remote: {found}")
+    assert "did not answer" not in found, (
+        f"the check consulted the unreachable remote instead of the local tracking "
+        f"ref - that is the 49-minute-offline defect: {found}")
+
+
+
+    # ---- 9. the branch has NO upstream of its own ----
+    # The first version of this case ALWAYS set an upstream, so the fallback
+    # resolution was never exercised: when the branch names no upstream, the
+    # tracking ref must still be found (the remote's HEAD symbolic ref, or any
+    # branch the remote tracks). The mutation that removed the upstream branch
+    # of that resolution ESCAPED this case, which is how the gap was found.
+    #
+    # The state is built by pushing WITHOUT setting an upstream, and then
+    # clearing the branch's upstream config, so the remote has a tracking ref
+    # but the branch names none. `git push` creates `refs/remotes/<remote>/<branch>`
+    # on its own - measured, not assumed - so the ref exists without an upstream.
+    no_up = root / "noupstream"
+    no_up.mkdir()
+    _git(no_up, "init", "-q")
+    _git(no_up, "config", "user.email", "t@t")
+    _git(no_up, "config", "user.name", "t")
+    (no_up / "scripts").mkdir()
+    shutil.copyfile(G, no_up / "scripts/genome")
+    _git(no_up, "add", "-A")
+    _git(no_up, "commit", "-qm", "genome: commit the vendored CLI")
+    noup_remote = root / "noupstream.git"
+    _git(root, "init", "-q", "--bare", str(noup_remote))
+    _git(no_up, "remote", "add", "origin", str(noup_remote))
+    # Push WITHOUT naming an upstream. MEASURED: `git push origin HEAD:refs/heads/main`
+    # with no upstream configured creates `refs/remotes/origin/main` ("update by push")
+    # and sets NO branch.main.* config at all - so the branch names no upstream while
+    # the remote still has a local tracking ref. That is exactly the state.
+    _git(no_up, "push", "-q", "origin", "HEAD:refs/heads/main")
+    # MEASURED before asserting: the branch has no upstream, and the tracking ref exists.
+    assert subprocess.run(["git", "-C", str(no_up), "rev-parse", "--abbrev-ref", "@{u}"],
+                          capture_output=True).returncode != 0, (
+        "the fixture accidentally set an upstream, so the fallback resolution was "
+        "never exercised")
+    assert subprocess.run(["git", "-C", str(no_up), "rev-parse", "--verify", "-q",
+                           "refs/remotes/origin/main"],
+                          capture_output=True).returncode == 0, (
+        "the fixture did not create the tracking ref the fallback must find")
+    # One commit the remote has not been told about.
+    _git(no_up, "commit", "-q", "--allow-empty", "-m", "a commit the remote never got")
+    manifest.write_text(json.dumps({
+        "schema": 1,
+        "installs": [
+            {"kind": "vendored", "path": str(no_up), "version": "?"},
+            {"kind": "skill", "path": str(root / "skill"), "version": "?"},
+        ],
+    }))
+    found = _unpushed_through_cli(no_up, env)
+    assert found is not None, (
+        "a repo whose branch has no upstream of its own was NOT reported - the "
+        "tracking ref must still be resolved from the remote, so a branch that "
+        "names no upstream cannot hide an unpushed commit")
+    assert "not on origin" in found, (
+        f"the detail did not name the remote: {found}")
+
+    # ---- 10. the comparison cannot be MADE, and that is not a pass ----
+    # The tracking ref exists, but HEAD cannot be compared against it. The
+    # first version of this case never produced this state, so the branch that
+    # reports "cannot be decided" was never exercised, and the mutation that
+    # turned that branch into a silent pass ESCAPED.
+    #
+    # THE STATE IS REACHABLE, and it is not exotic: a repo whose HEAD is UNBORN
+    # (a branch with no commit yet) but which HAS a tracking ref makes
+    # `git rev-list --count <ref>..HEAD` fail with "unknown revision", while
+    # `git rev-parse --verify <ref>` still SUCCEEDS. MEASURED:
+    #     rev-parse --verify -q refs/remotes/origin/main  -> SUCCEEDS
+    #     rev-list --count refs/remotes/origin/main..HEAD   -> fatal: ambiguous argument
+    # So the ref is known and the comparison still cannot be made - which is
+    # exactly the "a measurement that could NOT be taken" case, and it must not
+    # read as a pass.
+    unborn = root / "unborn"
+    unborn.mkdir()
+    _git(unborn, "init", "-q")
+    _git(unborn, "config", "user.email", "t@t")
+    _git(unborn, "config", "user.name", "t")
+    (unborn / "scripts").mkdir()
+    shutil.copyfile(G, unborn / "scripts/genome")
+    _git(unborn, "add", "-A")
+    unborn_remote = root / "unborn.git"
+    _git(root, "init", "-q", "--bare", str(unborn_remote))
+    _git(unborn, "remote", "add", "origin", str(unborn_remote))
+    # The tracking ref is created by FETCHING a real commit from elsewhere, so
+    # the ref resolves and HEAD stays unborn.
+    _git(unborn, "fetch", "-q", str(named), "main:refs/remotes/origin/main")
+    # MEASURED before asserting: the ref resolves, and the comparison fails.
+    assert subprocess.run(["git", "-C", str(unborn), "rev-parse", "--verify", "-q",
+                           "refs/remotes/origin/main"],
+                          capture_output=True).returncode == 0, (
+        "the fixture did not create a resolvable tracking ref")
+    assert subprocess.run(["git", "-C", str(unborn), "rev-list", "--count",
+                           "refs/remotes/origin/main..HEAD"],
+                          capture_output=True).returncode != 0, (
+        "the fixture did not create a state where the comparison cannot be made")
+    manifest.write_text(json.dumps({
+        "schema": 1,
+        "installs": [
+            {"kind": "vendored", "path": str(unborn), "version": "?"},
+            {"kind": "skill", "path": str(root / "skill"), "version": "?"},
+        ],
+    }))
+    found = _unpushed_through_cli(unborn, env)
+    assert found is not None, (
+        "a repo whose push state cannot be decided was reported as clean - a "
+        "measurement that could not be taken must never read as a pass")
+    assert "cannot be decided" in found, (
+        f"the detail did not say the answer could not be decided: {found}")
+
+    # ---- 11. the detail says HOW MANY commits are unpushed ----
+    # The first version of this case asserted only that the detail said "not on
+    # origin", so a detail that dropped the NUMBER still passed, and the
+    # mutation that dropped the count ESCAPED. The number is the actionable
+    # part: an operator reading "not on origin" does not know whether they have
+    # one commit to push or forty.
+    counted = root / "counted"
+    counted.mkdir()
+    _git(counted, "init", "-q")
+    _git(counted, "config", "user.email", "t@t")
+    _git(counted, "config", "user.name", "t")
+    (counted / "scripts").mkdir()
+    shutil.copyfile(G, counted / "scripts/genome")
+    _git(counted, "add", "-A")
+    _git(counted, "commit", "-qm", "genome: commit the vendored CLI")
+    counted_remote = root / "counted.git"
+    _git(root, "init", "-q", "--bare", str(counted_remote))
+    _git(counted, "remote", "add", "origin", str(counted_remote))
+    _git(counted, "push", "-q", "origin", "HEAD:refs/heads/main")
+    # THREE commits the remote never heard about.
+    for i in range(3):
+        _git(counted, "commit", "-q", "--allow-empty",
+             "-m", f"genome: commit the vendored CLI {i}")
+    manifest.write_text(json.dumps({
+        "schema": 1,
+        "installs": [
+            {"kind": "vendored", "path": str(counted), "version": "?"},
+            {"kind": "skill", "path": str(root / "skill"), "version": "?"},
+        ],
+    }))
+    found = _unpushed_through_cli(counted, env)
+    assert found is not None, (
+        "a repo with three unpushed commits was NOT reported")
+    assert "3 commit(s)" in found, (
+        f"the detail did not say how many commits are unpushed: {found}")
+
+
+    # ---- 12. the branch tracks a NON-DEFAULT remote branch ----
+    # THE MUTATION THAT ESCAPED. Removing the upstream branch of `_tracking_ref`
+    # makes the comparison fall back to the remote's DEFAULT branch, and for
+    # most repos the two are the same ref - so the mutation is invisible, and it
+    # escaped the case as it was written.
+    #
+    # THE STATE THAT DISTINGUISHES THEM: a branch tracking a non-default remote
+    # branch. MEASURED on this exact fixture:
+    #     the upstream ref (origin/feature)  -> 1 commit not on it
+    #     the remote's DEFAULT branch         -> 3 commits not on it
+    # because the default branch holds two commits of its own that the feature
+    # branch does not contain. Comparing against the default branch would
+    # report THREE unpushed commits where the truth is ONE.
+    #
+    # This is the same shape as the two fleet repos that exposed the ORIGINAL
+    # defect, where the old code compared against the remote's default branch
+    # HEAD and reported 48 and 41 unpushed commits where the truth was 1.
+    #
+    # The fixture is built from a SEED repo so the remote genuinely has two
+    # branches with DIFFERENT histories:
+    #     seed/main    -> 1 commit
+    #     seed/feature -> 3 commits (main's 1, plus 2 more)
+    # A clone then checks out `feature` from origin/feature, tracks
+    # origin/feature, and adds ONE new commit.
+    seed = root / "seed"
+    seed.mkdir()
+    _git(seed, "init", "-q")
+    _git(seed, "config", "user.email", "t@t")
+    _git(seed, "config", "user.name", "t")
+    (seed / "scripts").mkdir()
+    shutil.copyfile(G, seed / "scripts/genome")
+    _git(seed, "add", "-A")
+    _git(seed, "commit", "-qm", "genome: commit the vendored CLI")
+    branchy = root / "branchy.git"
+    _git(root, "init", "-q", "--bare", str(branchy))
+    _git(seed, "remote", "add", "origin", str(branchy))
+    _git(seed, "push", "-q", "origin", "HEAD:refs/heads/main")
+    _git(seed, "checkout", "-q", "-b", "feature")
+    _git(seed, "commit", "-q", "--allow-empty", "-m", "a commit only feature has")
+    _git(seed, "commit", "-q", "--allow-empty", "-m", "another commit only feature has")
+    _git(seed, "push", "-q", "origin", "HEAD:refs/heads/feature")
+    # The local checkout tracks the NON-DEFAULT branch.
+    tracked = root / "tracked"
+    _git(root, "clone", "-q", str(branchy), str(tracked))
+    _git(tracked, "config", "user.email", "t@t")
+    _git(tracked, "config", "user.name", "t")
+    _git(tracked, "checkout", "-q", "-b", "feature", "origin/feature")
+    _git(tracked, "branch", "--set-upstream-to=origin/feature")
+    _git(tracked, "commit", "-q", "--allow-empty", "-m", "a commit the remote never got")
+    # MEASURED before asserting: the upstream and the default branch are
+    # DIFFERENT refs, and they give DIFFERENT counts.
+    assert subprocess.run(["git", "-C", str(tracked), "rev-parse", "--abbrev-ref", "@{u}"],
+                          capture_output=True, text=True).stdout.strip() == "origin/feature", (
+        "the fixture did not put the branch on the non-default remote branch")
+    upstream_count = subprocess.run(
+        ["git", "-C", str(tracked), "rev-list", "--count", "refs/remotes/origin/feature..HEAD"],
+        capture_output=True, text=True).stdout.strip()
+    default_count = subprocess.run(
+        ["git", "-C", str(tracked), "rev-list", "--count", "refs/remotes/origin/HEAD..HEAD"],
+        capture_output=True, text=True).stdout.strip()
+    assert upstream_count == "1" and default_count == "3", (
+        f"the fixture does not distinguish the two refs: upstream={upstream_count}, "
+        f"default={default_count}")
+    manifest.write_text(json.dumps({
+        "schema": 1,
+        "installs": [
+            {"kind": "vendored", "path": str(tracked), "version": "?"},
+            {"kind": "skill", "path": str(root / "skill"), "version": "?"},
+        ],
+    }))
+    found = _unpushed_through_cli(tracked, env)
+    assert found is not None, (
+        "a repo whose branch tracks a non-default remote branch was NOT reported")
+    assert "1 commit(s)" in found, (
+        "the commit count was taken against the remote's DEFAULT branch instead of "
+        f"the branch's own upstream - that misattributes the remote's own commits "
+        f"to the local repo: {found}")
 
 def _unpushed_through_cli(repo: Path, env):
     """The UNPUSHED detail the CLI prints for `repo`, or None when it prints none.
