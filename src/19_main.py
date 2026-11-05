@@ -153,6 +153,9 @@ def main() -> None:
     s.add_argument("--apply", action="store_true", help="upgrade: actually perform the upgrades (default: dry run)")
     s.add_argument("--against-shipped", action="store_true", dest="against_shipped",
                    help="verify: compare every install against the freshest skill/bin copy, not against its own registration")
+    s.add_argument("--refresh", action="store_true", dest="refresh",
+                   help="verify --against-shipped: fetch each repo's remote first, so the push verdict is about the remote now "
+                        "and not about this machine's last known state (opt-in: it needs the network, and it is bounded per repo)")
     s.add_argument("--roots", nargs="*", default=None,
                    help="scan: directories to sweep for activated genomes (genome.toml / kb.toml) the manifest does not know; "
                         "upgrade: scope the dispatch to these installed names or paths")

@@ -36,7 +36,8 @@ REPO = HERE.parent
 sys.path.insert(0, str(HERE))
 import mutation_install_sh  # noqa: E402  (needs HERE on the path first)
 import mutation_append_only  # noqa: E402  (same)
-import mutation_e004  # noqa: E402  (same)
+import mutation_e004
+import mutation_push_rung  # noqa: E402  (same)
 import mutation_init  # noqa: E402  (same)
 SCRATCH = Path(os.environ.get("JCODE_SCRATCH_DIR") or tempfile.gettempdir()) / "genome-mutation"
 ROOT = REPO          # rebound to the worktree by main()
@@ -210,6 +211,29 @@ def e004_mutation(name):
     return apply
 
 
+def push_rung_mutation(name):
+    """The MUTATION for the push rung - the check that reports a committed but
+    unpushed vendored CLI, and the --refresh flag that buys certainty about the
+    remote.
+
+    The push rung's guard and the guarded logic arrived TOGETHER (the case and
+    the fix were written in the same change), so there is no pre-fix commit to
+    revert to that would revert only the push rung. The equivalent is a small
+    edit that removes the guard while leaving the file parseable, which is what
+    scripts/mutation_push_rung.py does.  Same shape as install_sh_mutation, and
+    for the same reason: the MUTATION is returned, not a mutate-and-run bundle,
+    so the control phase stays a plain run.
+
+    WHY THIS EXISTS IN THE REPO AT ALL: until it did, the guard that protected
+    the push rung lived only in a scratch harness, and the scratch directory is
+    not the repo.  A guard that is not in the repo is not a guard - the d10
+    lesson, applied to my own work.
+    """
+    def apply():
+        mutation_push_rung.mutate_push_rung(ROOT, name)
+    return apply
+
+
 def init_mutation(name):
     """The MUTATION for the init-scaffold guard.
 
@@ -327,11 +351,85 @@ MUTATIONS = [
      "src/13_init.py", "HEAD", True, kernel_suite,
      ("init_scaffold_has_no_dangling_pointer",),
      init_docs_mutation("init-readme-no-docs-links")),
+    # The PUSH RUNG - the check that reports a committed but unpushed vendored
+    # CLI.  It and its guard arrived together (2bf032c), so the ref is the
+    # CURRENT commit and the mutation removes the guard by editing the source.
+    # See scripts/mutation_push_rung.py.
+    #
+    # WHY THESE ARE HERE NOW: until they were, the guard that protected this
+    # rung lived only in a scratch harness.  The scratch directory is not the
+    # repo, so the next person to edit `_unpushed_cli` had no shipped guard.
+    # Every mutation below has been MEASURED to be caught by the case, and
+    # every one of them is a way the check can be a lie.
+    ("unpushed-needs-the-network",
+     "src/16b_installs.py", "HEAD", True, kernel_suite,
+     ("unpushed_vendored_cli",),
+     push_rung_mutation("unpushed-needs-the-network")),
+    ("unpushed-remote-probe",
+     "src/16b_installs.py", "HEAD", True, kernel_suite,
+     ("unpushed_vendored_cli",),
+     push_rung_mutation("unpushed-remote-probe")),
+    ("unpushed-unknown-reads-clean",
+     "src/16b_installs.py", "HEAD", True, kernel_suite,
+     ("unpushed_vendored_cli",),
+     push_rung_mutation("unpushed-unknown-reads-clean")),
+    ("unpushed-count-dropped",
+     "src/16b_installs.py", "HEAD", True, kernel_suite,
+     ("unpushed_vendored_cli",),
+     push_rung_mutation("unpushed-count-dropped")),
+    ("unpushed-no-remote-reported",
+     "src/16b_installs.py", "HEAD", True, kernel_suite,
+     ("unpushed_vendored_cli",),
+     push_rung_mutation("unpushed-no-remote-reported")),
+    ("unpushed-wrong-branch",
+     "src/16b_installs.py", "HEAD", True, kernel_suite,
+     ("unpushed_vendored_cli",),
+     push_rung_mutation("unpushed-wrong-branch")),
+    ("unpushed-zero-count-reported",
+     "src/16b_installs.py", "HEAD", True, kernel_suite,
+     ("unpushed_vendored_cli",),
+     push_rung_mutation("unpushed-zero-count-reported")),
+    # The --refresh flag: the opt-in path that buys certainty about the remote.
+    ("refresh-never-runs",
+     "src/16b_installs.py", "HEAD", True, kernel_suite,
+     ("unpushed_vendored_cli",),
+     push_rung_mutation("refresh-never-runs")),
+    ("refresh-failure-silent",
+     "src/16b_installs.py", "HEAD", True, kernel_suite,
+     ("unpushed_vendored_cli",),
+     push_rung_mutation("refresh-failure-silent")),
+    ("refresh-failure-invents",
+     "src/16b_installs.py", "HEAD", True, kernel_suite,
+     ("unpushed_vendored_cli",),
+     push_rung_mutation("refresh-failure-invents")),
+    ("refresh-creates-tracking-ref",
+     "src/16b_installs.py", "HEAD", True, kernel_suite,
+     ("unpushed_vendored_cli",),
+     push_rung_mutation("refresh-creates-tracking-ref")),
+    ("refresh-unbounded",
+     "src/16b_installs.py", "HEAD", True, kernel_suite,
+     ("unpushed_vendored_cli",),
+     push_rung_mutation("refresh-unbounded")),
+    ("refresh-on-by-default",
+     "src/16b_installs.py", "HEAD", True, kernel_suite,
+     ("unpushed_vendored_cli",),
+     push_rung_mutation("refresh-on-by-default")),
 ]
 
 
 def main() -> int:
     global ROOT
+    # EVERY PUSH-RUNG ENTRY MUST NAME A MUTATION THE MODULE CAN APPLY.  A typo
+    # would otherwise become a no-op mutation, and an equivalent mutation
+    # proves nothing - it would be reported as a catch while changing no
+    # behaviour at all.  The module raises if its target text is not found, so
+    # this is belt and braces.
+    known = set(mutation_push_rung.NAMES)
+    for entry in MUTATIONS:
+        if len(entry) > 6 and entry[0].startswith(("unpushed-", "refresh-")):
+            if entry[0] not in known:
+                print(f"FATAL: the mutation entry {entry[0]!r} is not one the module can apply")
+                return 2
     ap = argparse.ArgumentParser()
     ap.add_argument("--keep", action="store_true",
                     help="leave the worktree in place (for debugging)")

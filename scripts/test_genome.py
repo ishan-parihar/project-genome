@@ -3168,7 +3168,13 @@ def unpushed_vendored_cli(root: Path) -> None:
          decided", because a measurement that could not be taken is not a pass;
      11. the detail says HOW MANY commits are unpushed;
      12. the branch tracks a NON-DEFAULT remote branch -> the count is taken
-         against the branch's OWN upstream, not the remote's default branch.
+         against the branch's OWN upstream, not the remote's default branch;
+     13. `--refresh` fetches the remote, so a rewritten remote is seen;
+     14. a refresh that FAILS is reported, and invents no verdict;
+     15. `--refresh` does not create a tracking ref for a remote the checkout
+         has never contacted, so "cannot be decided" stays "cannot be decided";
+     16. the refresh is BOUNDED - a hanging remote is cut off, and the cut-off is
+         reported rather than passed off as a fresh verdict.
 
     States 9, 10, 11 and 12 were NOT in the first version of this case. The
     mutation harness found them: removing the upstream branch of the ref
@@ -3702,6 +3708,282 @@ def unpushed_vendored_cli(root: Path) -> None:
         "the commit count was taken against the remote's DEFAULT branch instead of "
         f"the branch's own upstream - that misattributes the remote's own commits "
         f"to the local repo: {found}")
+
+
+    # ---- 13. `--refresh`: the flag that buys certainty about the remote ----
+    # MY d12 PLAN PROMISED THIS FLAG AND DID NOT SHIP IT. The plan said: "Keep
+    # the network as an OPTION, not a requirement: a flag that refreshes the
+    # tracking refs first, so an operator who needs certainty can pay for it,
+    # and the default path stays fast and works offline."
+    #
+    # WHY IT EXISTS: the local tracking ref says what the remote was last KNOWN
+    # to hold. It cannot see a force-push, a deleted branch, or a remote that
+    # moved while the operator was away.
+    #
+    # THE REMOTE IS A LOCAL bare repo, so the fetch is REAL - it exercises the
+    # whole path - without touching the network.
+    #
+    # THE WATCHER MUST BE A SEPARATE CLONE FROM THE COLLABORATOR. The first
+    # version of this fixture used one repo for both, so the watcher's HEAD was
+    # the very commit it had pushed and the rewritten history was irrelevant to
+    # it - the verdict never changed, and the case failed for the wrong reason.
+    #
+    # THE GIT BEHAVIOUR THIS RESTS ON, MEASURED and not assumed:
+    #     the collaborator pushes A, then B;
+    #     a watcher clones, so the watcher's HEAD and tracking ref are both B;
+    #     the collaborator resets onto A, commits C, and force-pushes;
+    #     the remote's main is now C, which does NOT contain B;
+    #     the watcher's tracking ref is STILL B - the local ref says "nothing is
+    #     unpushed", which is now FALSE;
+    #     `git fetch` moves the tracking ref to C, and the count becomes 1.
+    # A plain fetch DOES update a remote-tracking ref across a force-push: the
+    # tracking ref is a mirror, not a branch, so git does not refuse the
+    # non-fast-forward. That is the mechanism the flag relies on.
+    live = root / "live.git"
+    _git(root, "init", "-q", "--bare", str(live))
+    collab = root / "collab"
+    collab.mkdir()
+    _git(collab, "init", "-q")
+    _git(collab, "config", "user.email", "t@t")
+    _git(collab, "config", "user.name", "t")
+    (collab / "scripts").mkdir()
+    shutil.copyfile(G, collab / "scripts/genome")
+    _git(collab, "add", "-A")
+    _git(collab, "commit", "-qm", "genome: commit the vendored CLI")
+    _git(collab, "remote", "add", "origin", str(live))
+    _git(collab, "push", "-q", "origin", "HEAD:refs/heads/main")
+    # The commit the watcher will be sitting on, and which the rewrite discards.
+    _git(collab, "commit", "-q", "--allow-empty", "-m", "a commit that will be rewritten away")
+    _git(collab, "push", "-q", "origin", "HEAD:refs/heads/main")
+    # The WATCHER: a separate clone, so its HEAD is that commit and its tracking
+    # ref points at it.
+    watcher = root / "watcher"
+    _git(root, "clone", "-q", str(live), str(watcher))
+    _git(watcher, "config", "user.email", "t@t")
+    _git(watcher, "config", "user.name", "t")
+    # The collaborator REWRITES the remote's history: reset onto the earlier
+    # commit and force-push a different one. The remote no longer holds the
+    # watcher's commit at all.
+    _git(collab, "reset", "-q", "--hard", "HEAD~1")
+    _git(collab, "commit", "-q", "--allow-empty", "-m", "a different history entirely")
+    _git(collab, "push", "-q", "--force", "origin", "HEAD:refs/heads/main")
+    # MEASURED before asserting: the watcher's tracking ref is STALE, and the
+    # stale ref says nothing is unpushed.
+    stale_ref = _git(watcher, "rev-parse", "--verify", "-q",
+                      "refs/remotes/origin/main", check=False)
+    manifest.write_text(json.dumps({
+        "schema": 1,
+        "installs": [
+            {"kind": "vendored", "path": str(watcher), "version": "?"},
+            {"kind": "skill", "path": str(root / "skill"), "version": "?"},
+        ],
+    }))
+    # WITHOUT the flag, the local ref is what answers, and it says nothing is
+    # unpushed - because the local HEAD is the commit the local ref points at.
+    plain = subprocess.run([sys.executable, G, "installs", "verify", "--against-shipped"],
+                            cwd=repo, capture_output=True, text=True, env=env)
+    assert "STALE-REF" not in plain.stdout, (
+        "the default path must not touch the network at all - it reported a stale ref "
+        f"without being asked to: {plain.stdout}")
+    assert str(watcher) not in plain.stdout, (
+        "the local ref should say nothing is unpushed here, because the local HEAD is "
+        f"the commit the local ref points at: {plain.stdout}")
+    # WITH the flag, the remote is fetched, the tracking ref moves to the
+    # rewritten history, and the watcher's commit is seen as not on the remote.
+    fresh = subprocess.run([sys.executable, G, "installs", "verify", "--against-shipped",
+                             "--refresh"],
+                            cwd=repo, capture_output=True, text=True, env=env)
+    assert str(watcher) in fresh.stdout, (
+        "the refresh did not see the rewritten remote - the flag exists for exactly "
+        f"this state, and the remote's history no longer holds the local commit: "
+        f"{fresh.stdout}")
+    assert "STALE-REF" not in fresh.stdout, (
+        f"the refresh reported a failure for a reachable local remote: {fresh.stdout}")
+
+    # ---- 14. a refresh that FAILS says so, and invents no verdict ----
+    # A failed refresh says NOTHING about whether a commit is pushed, so it must
+    # not create an UNPUSHED row. And it must not be silent, because a silent
+    # fallback to the local ref would be the silent-green class this session has
+    # been about - the operator would read a stale verdict as a fresh one.
+    #
+    # The first version of the implementation returned a non-None row on a failed
+    # refresh, which produced a spurious UNPUSHED row out of a network failure.
+    # This state is what caught it.
+    gone = root / "gone"
+    gone.mkdir()
+    _git(gone, "init", "-q")
+    _git(gone, "config", "user.email", "t@t")
+    _git(gone, "config", "user.name", "t")
+    (gone / "scripts").mkdir()
+    shutil.copyfile(G, gone / "scripts/genome")
+    _git(gone, "add", "-A")
+    _git(gone, "commit", "-qm", "genome: commit the vendored CLI")
+    gone_remote = root / "gone.git"
+    _git(root, "init", "-q", "--bare", str(gone_remote))
+    _git(gone, "remote", "add", "origin", str(gone_remote))
+    _git(gone, "push", "-q", "origin", "HEAD:refs/heads/main")
+    # The remote's URL now points at a path that does not exist, so the fetch
+    # FAILS INSTANTLY - no timeout to wait for, and the failure is legible.
+    _git(gone, "remote", "set-url", "origin", str(root / "no-such-remote.git"))
+    manifest.write_text(json.dumps({
+        "schema": 1,
+        "installs": [
+            {"kind": "vendored", "path": str(gone), "version": "?"},
+            {"kind": "skill", "path": str(root / "skill"), "version": "?"},
+        ],
+    }))
+    failed = subprocess.run([sys.executable, G, "installs", "verify", "--against-shipped",
+                             "--refresh"],
+                            cwd=repo, capture_output=True, text=True, env=env)
+    assert "STALE-REF" in failed.stdout, (
+        "a refresh that FAILED was silent - the operator would read a verdict taken "
+        f"from this machine's last known state as one taken from the remote: "
+        f"{failed.stdout}")
+    assert str(gone) not in failed.stdout or "STALE-REF" in failed.stdout, (
+        "a failed refresh invented an UNPUSHED row - a network failure says nothing "
+        f"about whether a commit is pushed: {failed.stdout}")
+    assert "UNPUSHED  vendored " + str(gone) not in failed.stdout, (
+        "a failed refresh created a spurious UNPUSHED row - a network failure says "
+        f"nothing about whether a commit is pushed: {failed.stdout}")
+
+    # ---- 15. the refresh does NOT create certainty where there is none ----
+    # A repo whose remote it has NEVER contacted must stay "cannot be decided"
+    # even with the flag. Fetching that remote would CREATE a tracking ref, and
+    # the "never been fetched or pushed to" unknown would silently become a false
+    # certainty - the exact defect d12's state 4 covers.
+    unseen = root / "unseen"
+    unseen.mkdir()
+    _git(unseen, "init", "-q")
+    _git(unseen, "config", "user.email", "t@t")
+    _git(unseen, "config", "user.name", "t")
+    (unseen / "scripts").mkdir()
+    shutil.copyfile(G, unseen / "scripts/genome")
+    _git(unseen, "add", "-A")
+    _git(unseen, "commit", "-qm", "genome: commit the vendored CLI")
+    # The remote MUST EXIST AND BE REACHABLE. The first version of this fixture
+    # pointed the remote at a path that does not exist, so the fetch FAILED either
+    # way and the "only refresh a remote this checkout has already contacted" gate
+    # was never exercised - the mutation that removed it escaped, because it was
+    # an EQUIVALENT mutation.
+    #
+    # MEASURED: `git fetch` to a non-existent local path creates NO tracking ref
+    # (the fetch fails first), so the fixture could not see the difference.
+    # With a REACHABLE remote, the fetch succeeds and DOES create a tracking ref,
+    # so the gate is load-bearing: without it, this repo's "never been fetched or
+    # pushed to" unknown would silently become a false certainty.
+    unseen_remote = root / "unseen.git"
+    _git(root, "init", "-q", "--bare", str(unseen_remote))
+    # The remote must HOLD A COMMIT. MEASURED: `git fetch` from an EMPTY remote
+    # creates NO tracking ref - there is nothing to fetch - so the mutation that
+    # removed the "only refresh a remote this checkout has already contacted"
+    # gate changed nothing observable and ESCAPED. It was an EQUIVALENT
+    # mutation, and no test can catch an equivalent mutation. With a commit in
+    # the remote, the fetch succeeds and DOES create a tracking ref, so the gate
+    # is load-bearing: without it, this repo's "never been fetched or pushed to"
+    # unknown would silently become a false certainty.
+    # The name is unique: an earlier state already uses root/"seed".
+    unseen_seed = root / "unseen-seed"
+    unseen_seed.mkdir()
+    _git(unseen_seed, "init", "-q")
+    _git(unseen_seed, "config", "user.email", "t@t")
+    _git(unseen_seed, "config", "user.name", "t")
+    (unseen_seed / "scripts").mkdir()
+    shutil.copyfile(G, unseen_seed / "scripts/genome")
+    _git(unseen_seed, "add", "-A")
+    _git(unseen_seed, "commit", "-qm", "genome: commit the vendored CLI")
+    _git(unseen_seed, "remote", "add", "origin", str(unseen_remote))
+    _git(unseen_seed, "push", "-q", "origin", "HEAD:refs/heads/main")
+    _git(unseen, "remote", "add", "origin", str(unseen_remote))
+    manifest.write_text(json.dumps({
+        "schema": 1,
+        "installs": [
+            {"kind": "vendored", "path": str(unseen), "version": "?"},
+            {"kind": "skill", "path": str(root / "skill"), "version": "?"},
+        ],
+    }))
+    never = subprocess.run([sys.executable, G, "installs", "verify", "--against-shipped",
+                            "--refresh"],
+                           cwd=repo, capture_output=True, text=True, env=env)
+    assert "cannot be decided" in never.stdout, (
+        "a repo whose remote it has never contacted lost its 'cannot be decided' "
+        f"verdict when the flag was used - the refresh must not create a tracking "
+        f"ref for a remote the checkout has never contacted: {never.stdout}")
+
+    # ---- 16. the refresh is BOUNDED: a hanging remote does not hang the check ----
+    # THE BOUND IS LOAD-BEARING, and MEASURED to be so.
+    #
+    # git's `http.lowSpeedLimit` and `http.lowSpeedTime` do NOT bound a
+    # BLACKHOLED connect. Measured: a fetch to https://10.255.255.1/ with those
+    # settings ran the full 30s and was still running when the outer timeout
+    # killed it, and adding `http.connectTimeout=5` did not help either. So the
+    # SUBPROCESS TIMEOUT is the only bound - and that is the d12 defect's own
+    # shape (a 60s timeout that hung for 49 minutes) reappearing in miniature.
+    # The bound has to be proven, not assumed, or removing it changes nothing
+    # observable and no test can catch it.
+    #
+    # The blackhole is reached through a PRIVATE git config via
+    # GIT_CONFIG_GLOBAL, so the operator's own git config is never touched.
+    import time as _time
+    blackhole_cfg = root / "blackhole.gitconfig"
+    # The rewrite goes to HTTP, not SSH, and that is LOAD-BEARING. MEASURED:
+    #   ssh://git@github.com/ -> 10.255.255.1  gives up in 10.0s, because
+    #     /etc/ssh/ssh_config.d/20-omarchy-keepalive.conf sets `ConnectTimeout 10`
+    #     - EXACTLY the subprocess timeout, so removing the subprocess timeout
+    #     changed nothing observable and the mutation escaped;
+    #   http://github.com/ -> 10.255.255.1 hangs INDEFINITELY: git's
+    #     http.lowSpeedLimit/lowSpeedTime govern the TRANSFER, and a connection
+    #     that never establishes never transfers anything, so the cut-off never
+    #     fires. MEASURED: it was still running when a 90s outer timeout killed it.
+    # So only the HTTP route makes the subprocess bound provable.
+    blackhole_cfg.write_text(
+        "[url \"http://10.255.255.1/\"]\n"
+        "\tinsteadOf = https://github.com/\n")
+    hanging = root / "hanging"
+    hanging.mkdir()
+    _git(hanging, "init", "-q")
+    _git(hanging, "config", "user.email", "t@t")
+    _git(hanging, "config", "user.name", "t")
+    (hanging / "scripts").mkdir()
+    shutil.copyfile(G, hanging / "scripts/genome")
+    _git(hanging, "add", "-A")
+    _git(hanging, "commit", "-qm", "genome: commit the vendored CLI")
+    # The remote is a REAL local repo - so the tracking ref exists and the check
+    # WILL try to fetch it - but its URL is rewritten to a blackhole, so the
+    # fetch HANGS rather than failing fast.
+    hanging_remote = root / "hanging.git"
+    _git(root, "init", "-q", "--bare", str(hanging_remote))
+    _git(hanging, "remote", "add", "origin", str(hanging_remote))
+    _git(hanging, "push", "-q", "origin", "HEAD:refs/heads/main")
+    _git(hanging, "remote", "set-url", "origin", "https://github.com/hanging.git")
+    manifest.write_text(json.dumps({
+        "schema": 1,
+        "installs": [
+            {"kind": "vendored", "path": str(hanging), "version": "?"},
+            {"kind": "skill", "path": str(root / "skill"), "version": "?"},
+        ],
+    }))
+    bounded_env = dict(env)
+    bounded_env["GIT_CONFIG_GLOBAL"] = str(blackhole_cfg)
+    _t0 = _time.time()
+    bounded = subprocess.run([sys.executable, G, "installs", "verify", "--against-shipped",
+                               "--refresh"],
+                              cwd=repo, capture_output=True, text=True, env=bounded_env,
+                              timeout=120)
+    elapsed = _time.time() - _t0
+    assert elapsed < 45, (
+        f"the refresh took {elapsed:.0f}s against a hanging remote - the bound that "
+        f"keeps this from becoming the d12 defect (49 minutes) is not working: "
+        f"{bounded.stdout}")
+    # AND the cut-off must be REPORTED, not silent. A refresh that was cut off is
+    # a measurement that could not be taken, and it must not read as a refresh
+    # that was taken.
+    assert "timed out" in bounded.stdout or "failed" in bounded.stdout, (
+        "the refresh was cut off but did not say so - a timeout is a measurement "
+        f"that could not be taken, and it must not read as a fresh verdict: "
+        f"{bounded.stdout}")
+    assert "STALE-REF" in bounded.stdout, (
+        "a refresh that HUNG and was cut off was silent - the operator must be told "
+        f"the verdict came from this machine's last known state: {bounded.stdout}")
 
 def _unpushed_through_cli(repo: Path, env):
     """The UNPUSHED detail the CLI prints for `repo`, or None when it prints none.

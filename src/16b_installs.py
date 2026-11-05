@@ -63,7 +63,7 @@ def _version_key(v: str) -> tuple:
     return tuple(int(g) for g in m.groups()) if m else (0, 0, 0, 0)
 
 
-def _verify_against_shipped(rows: list) -> None:
+def _verify_against_shipped(rows: list, refresh: bool = False) -> None:
     """The check the registry clause actually needs: every registered install against the
     SHIPPED reference, not against its own registration record. The reference is the
     freshest live version among the skill/bin rows — the copies install.sh manages —
@@ -172,13 +172,39 @@ def _verify_against_shipped(rows: list) -> None:
     # only of this machine. Like the rung above it is a report, not a gate: whose
     # commits belong on whose remote is the owner's call, and 46 owners hold it.
     unpushed = []
+    # The REFRESH, when asked for. It is opt-in because the default path must stay
+    # fast and must work with no network at all - the d12 defect was a check that
+    # needed the network, and a 49-minute offline hang is worse than a stale ref.
+    #
+    # A refresh that FAILED is reported on its own line and changes NO verdict:
+    # it says nothing about whether a commit is pushed, so it must not create an
+    # UNPUSHED row, and it must not be silent, so the operator knows the verdict
+    # below came from this machine's last known state. A failed refresh that
+    # silently reused the local ref would be exactly the silent-green class this
+    # session has been about.
+    refresh_failures = []
     for r in rows:
         if r.get("kind") not in ("vendored", "bin"):
             continue
         p = Path(r["path"])
+        if refresh:
+            resolved = _push_remote(p)
+            if resolved:
+                remote, ref = resolved
+                # Only refresh a remote this checkout has ALREADY contacted. Fetching
+                # a remote it has never contacted would CREATE a tracking ref, and
+                # that would silently convert the "never been fetched or pushed to"
+                # unknown into a false certainty - the defect d12's state 4 covers.
+                if ref:
+                    ok, note = _refresh_tracking_refs(p, remote)
+                    if not ok:
+                        refresh_failures.append((r, note))
         found = _unpushed_cli(p)
         if found:
             unpushed.append((r, found))
+    for r, note in refresh_failures:
+        print(f"STALE-REF {r['kind']:6} {r['path']} — {note}; the push verdict below is from "
+              f"this machine's last known state, not from the remote")
     for r, (cli, detail) in unpushed:
         try:
             shown = cli.relative_to(Path(r["path"]))
@@ -522,6 +548,39 @@ def _ref_exists(repo: Path, ref: str) -> bool:
     r = subprocess.run(["git", "-C", str(repo), "rev-parse", "--verify", "-q", ref],
                        capture_output=True, text=True, timeout=10)
     return r.returncode == 0
+
+
+def _refresh_tracking_refs(repo: Path, remote: str) -> tuple[bool, str]:
+    """Fetch the remote so the tracking refs are current. Returns (refreshed, note).
+
+    `refreshed` is True only when the fetch SUCCEEDED. A fetch that failed is a
+    measurement that could not be taken, and it must never read as a refresh that
+    was taken.
+
+    THE BOUNDS ARE THE POINT. The d12 defect was a check that needed the network:
+    one unreachable `ls-remote` hit a 60s timeout, and 63 repos extrapolated to 49
+    MINUTES of hanging. So this fetch is bounded three ways:
+      - a subprocess timeout of 10s, so a blackholed remote cannot hang the sweep;
+      - git's own `http.lowSpeedLimit`/`lowSpeedTime`, so a slow-but-not-dead
+        remote is also cut off;
+      - `GIT_TERMINAL_PROMPT=0` and an empty `GIT_ASKPASS`, so it cannot wait on a human.
+    """
+    env = dict(os.environ)
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    env["GIT_ASKPASS"] = ""
+    cmd = ["git", "-C", str(repo), "-c", "http.lowSpeedLimit=1", "-c", "http.lowSpeedTime=5",
+           "fetch", "--quiet", remote]
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=10, env=env)
+    except subprocess.TimeoutExpired:
+        return (False, f"the fetch from {remote} timed out after 10s")
+    except OSError as e:
+        return (False, f"the fetch from {remote} could not be run: {e}")
+    if r.returncode != 0:
+        detail = (r.stderr or r.stdout or "").strip().splitlines()
+        why = detail[0] if detail else f"git fetch exited {r.returncode}"
+        return (False, f"the fetch from {remote} failed: {why}")
+    return (True, "")
 
 
 def _unpushed_cli(repo: Path) -> tuple[Path, str] | None:
@@ -945,7 +1004,7 @@ def cmd_installs(args) -> None:
             die("no installs registered — this machine has proven nothing: run install.sh "
                 "(it registers everything it creates), or `genome installs scan`", ERR)
         if getattr(args, "against_shipped", False):
-            _verify_against_shipped(rows)
+            _verify_against_shipped(rows, refresh=getattr(args, "refresh", False))
             return
         stale, broken, unreadable = [], [], []
         for r in rows:

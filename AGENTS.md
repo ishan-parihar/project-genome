@@ -86,7 +86,7 @@ is too slow and too side-effecting for a gate that runs before every push. Run i
 after changing a check or a fix:
 
 ```
-python3 scripts/mutation_check.py    # 14/14 mutations caught; exit 0
+python3 scripts/mutation_check.py    # 27/27 mutations caught; exit 0
 ```
 
 It runs in its own worktree and proves the live checkout came through untouched.
