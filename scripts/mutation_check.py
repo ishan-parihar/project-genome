@@ -37,6 +37,7 @@ sys.path.insert(0, str(HERE))
 import mutation_install_sh  # noqa: E402  (needs HERE on the path first)
 import mutation_append_only  # noqa: E402  (same)
 import mutation_e004  # noqa: E402  (same)
+import mutation_init  # noqa: E402  (same)
 SCRATCH = Path(os.environ.get("JCODE_SCRATCH_DIR") or tempfile.gettempdir()) / "genome-mutation"
 ROOT = REPO          # rebound to the worktree by main()
 
@@ -209,6 +210,22 @@ def e004_mutation(name):
     return apply
 
 
+def init_mutation(name):
+    """The MUTATION for the init-scaffold guard.
+
+    `genome init` must write the README.md its own genome.toml declares and its
+    own AGENTS.md cites.  The write landed in 500d87d; the guard arrived later,
+    so reverting src/13_init.py to 500d87d^ would revert far more than that one
+    call.  The mutation drops the `write("README.md", readme)` line instead,
+    which is the honest pre-fix state.  Same shape as install_sh_mutation, and
+    for the same reason: the MUTATION is returned, not a mutate-and-run bundle,
+    so the control phase stays a plain run.
+    """
+    def apply():
+        mutation_init.mutate_init(ROOT, name)
+    return apply
+
+
 # (name, file to revert, ref holding the PRE-FIX version, needs rebuild, runner, cases)
 #
 # Each entry may carry a 7th element: an EXTRA mutation to apply on top of the
@@ -274,6 +291,16 @@ MUTATIONS = [
      "src/09_lint_checks.py", "HEAD", True, kernel_suite,
      ("e004_tombstone",),
      e004_mutation("e004-tombstone-blind")),
+    # The init-scaffold guard.  `genome init` must write the README.md its own
+    # genome.toml declares and its own AGENTS.md cites; before 500d87d it did
+    # not, so every scaffold it produced shipped a pointer to a file it had not
+    # created.  Six fleet repos carry it.  The write landed long before the
+    # guard, so the mutation drops the write rather than reverting a commit.
+    # See scripts/mutation_init.py.
+    ("init-no-readme",
+     "src/13_init.py", "HEAD", True, kernel_suite,
+     ("init_scaffold_has_no_dangling_pointer",),
+     init_mutation("init-no-readme")),
 ]
 
 

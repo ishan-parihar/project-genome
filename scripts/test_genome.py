@@ -211,6 +211,56 @@ def init_agents_note(root: Path) -> None:
 
 
 @case
+def init_scaffold_has_no_dangling_pointer(root: Path) -> None:
+    """`genome init` must not ship a pointer to a file it did not create.
+
+    Measured 2026-11-05: the pre-500d87d init (2026.11.02-60) wrote a
+    genome.toml declaring `readme = "README.md"` and an AGENTS.md whose routing
+    table cited `README.md`, but its file list never contained a top-level
+    README.md -- so the scaffold shipped a broken pointer BY CONSTRUCTION. Six
+    fleet repos carry it, and because their scaffolds were never committed the
+    lint could not see the half of the tree that was on disk.
+
+    The scaffold is the first thing an operator runs, so a defect in it is the
+    most expensive kind: it propagates to every repo it touches and it is
+    invisible until someone reads the AGENTS.md. E001 catches the SYMPTOM at
+    lint time; this catches the CAUSE at scaffold time.
+
+    Every profile is checked, because a profile nobody checks is a profile
+    nobody knows is broken. `full` needs `genome outline` first: the outline
+    module's zone is a derived surface, so the scaffold is not clean until it
+    is emitted -- that is init's own two-step, not a defect."""
+    for prof in ("software", "research", "team"):
+        d = root / f"p-{prof}"
+        d.mkdir()
+        new_repo(d)
+        run(d, "init", "--profile", prof)
+        git(d, "add", "-A"); git(d, "commit", "-qm", "init")
+        out = run(d, "lint", "--code", "E", "--all", ok=False).stdout
+        assert "E001" not in out, (f"the {prof} scaffold points at a file it did not create:\n" + out)
+        # The declared readme role must be a file that EXISTS, not a promise.
+        toml = (d / "genome.toml").read_text()
+        m = re.search(r'^readme = "([^"]+)"', toml, re.M)
+        assert m, f"the {prof} scaffold declares no readme role"
+        assert (d / m.group(1)).is_file(), (
+            f"the {prof} scaffold declares readme = {m.group(1)!r} and does not create it")
+        assert "`README.md`" not in (d / "AGENTS.md").read_text() or (d / "README.md").is_file(), (
+            f"the {prof} scaffold's AGENTS.md cites README.md and does not create it")
+
+    # `full` turns the outline module on, whose zone is derived: init's own
+    # second step is `genome outline`, and the scaffold is clean only after it.
+    d = root / "p-full"
+    d.mkdir()
+    new_repo(d)
+    run(d, "init", "--profile", "full")
+    run(d, "outline")
+    git(d, "add", "-A"); git(d, "commit", "-qm", "init")
+    out = run(d, "lint", "--code", "E", "--all", ok=False).stdout
+    assert "E001" not in out, (f"the full scaffold points at a file it did not create:\n" + out)
+    assert (d / "README.md").is_file(), "the full scaffold did not create the README it declares"
+
+
+@case
 def numbered_worklog(root: Path) -> None:
     """numbered worklog and E014"""
     full_repo(root)
