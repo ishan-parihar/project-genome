@@ -109,6 +109,21 @@ def cmd_log(args) -> None:
     if worklog_numbered(cfg):
         if not args.entry:
             die("numbered worklog: `genome log \"<title>\"` creates the next file")
+        # The numbered form lives in a DIRECTORY: every entry is its own
+        # NNNN-date-slug.md under it, and `worklog_files` already guards with
+        # `if d.is_dir()`. This branch never did. Measured 2026-11-05: a repo
+        # that only flips `worklog_form` to "numbered" while its `worklog`
+        # still points at the template's single file (`docs/kb/WORKLOG.md`)
+        # got `mkdir` called on a FILE and died with a raw FileExistsError
+        # traceback from an ordinary `genome log` — while `genome doctor`
+        # reported "healthy" on the same tree. A health check that says
+        # healthy next to a crashing command is a report that contradicts
+        # the tool's own behaviour, which is the shape `doctor` exists to
+        # prevent. Say what is wrong and how to fix it.
+        if not wl.is_dir():
+            die(f"numbered worklog needs `worklog` to be a DIRECTORY, but {cfg.rel(wl)} is a file.\n"
+                f"  Point the role at a directory (e.g. `worklog = \"{wl.parent.name}/{wl.stem}\"`) "
+                f"and move the existing entries into it; `worklog_form = \"file\"` keeps the single-file form.")
         with Guarded(wl / ".genome-log"):  # two sessions logging at once must not share a number
             nums = [int(re.match(r"\d+", f.name).group(0)) for f in worklog_files(cfg)]
             width = cfg.get("core", "worklog_width", 4)

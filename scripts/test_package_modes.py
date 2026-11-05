@@ -263,6 +263,63 @@ def installer_local_source_installs_the_local_checkout():
 
 
 @case
+def installer_local_source_rebuilds_a_stale_checkout():
+    """`--from-local` BUILDS the checkout, so a stale `scripts/genome` cannot ride
+    inside the wheel.
+
+    The claim this proves: the wheel force-includes `scripts/genome` as
+    `_genome.py`, so installing a checkout whose built script is older than its
+    source would silently ship the STALE kernel — the exact defect class V-108
+    was about ("the fix is in the fleet but not in the binary you run"), reached
+    by a different door. The commit message for `b5bb2eb` asserted this guard
+    works but nothing tested it. Measured 2026-11-05 by hand against a fixture
+    whose built script claimed `1999.01.01-STALE` against a source claiming
+    `2099.07.07-FRESH`: the installed binary reported the SOURCE's version.
+    That hand run is this case, so it stays runnable.
+
+    The fixture must be built first and then made stale. Backdating the file
+    alone is not enough — the version literal has to disagree, because that is
+    what the assertion reads.
+    """
+    if not shutil.which("uv"):
+        return
+    home = Path(tempfile.mkdtemp(prefix="genome-stale-")) / "home"
+    home.mkdir(parents=True)
+    tool_dir = home.parent / "uvtool"
+    tool_dir.mkdir()
+    local = home.parent / "checkout"
+    shutil.copytree(ROOT, local, ignore=shutil.ignore_patterns(
+        "dist", "__pycache__", ".git", "*.egg-info"))
+    # build it fresh, then make it stale: a DIFFERENT version literal in the built
+    # script, older than the source's. Without the two disagreeing, a pass proves
+    # nothing — the install could be shipping either byte stream.
+    build = run(["python3", str(local / "scripts" / "build.py")], cwd=str(local))
+    assert build.returncode == 0, f"the fixture checkout could not build: {build.stdout[-400:]}"
+    stale_src = (local / "src" / "01_constants.py").read_text()
+    src_v = re.search(r'^VERSION = "([^"]+)"', stale_src, re.M)
+    assert src_v, "the fixture checkout has no VERSION"
+    (local / "src" / "01_constants.py").write_text(
+        stale_src.replace(src_v.group(0), 'VERSION = "2099.07.07-FRESH"'))
+    gen = (local / "scripts" / "genome").read_text()
+    gen_v = re.search(r'VERSION = "[^"]+"', gen)
+    assert gen_v, "the built script carries no VERSION literal"
+    (local / "scripts" / "genome").write_text(
+        gen.replace(gen_v.group(0), 'VERSION = "1999.01.01-STALE"'))
+
+    out = run(["bash", str(ROOT / "install.sh"), "--from-local", str(local), "--no-cta"],
+              env=dict(os.environ, HOME=str(home), XDG_DATA_HOME=str(home / "data"),
+                       UV_TOOL_DIR=str(tool_dir), UV_TOOL_BIN_DIR=str(home / "bin")),
+              cwd=str(home))
+    both = out.stdout + out.stderr
+    assert out.returncode == 0, f"the local install failed: {both[-600:]}"
+    exe = next((p for p in (home / "bin" / "genome", tool_dir / "bin" / "genome") if p.exists()), None)
+    assert exe, f"no binary was installed: {both[-400:]}"
+    v = run([str(exe), "--version"]).stdout.strip()
+    assert "2099.07.07-FRESH" in v, f"the stale built script was installed instead of the rebuild: {v}"
+    assert "1999.01.01-STALE" not in v, f"the stale kernel shipped: {v}"
+
+
+@case
 def installer_exits_nonzero_when_it_refuses():
     """The rejection paths must be visible to a `set -e` CI job or a chained
     script — observed once where a piped `head` hid a real exit 1. Tested directly

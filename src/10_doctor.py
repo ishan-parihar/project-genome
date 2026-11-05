@@ -147,6 +147,20 @@ def doctor_findings(cfg: Cfg) -> tuple[list[str], list[str]]:
     # check that does not check the thing that is broken. Doctor already reports
     # what lint reports for the other roles, so it reports this too.
     finds += [p.replace("E501 ", "", 1) for p in kind_problems(cfg)]
+    # A numbered worklog must live in a DIRECTORY. Measured 2026-11-05: a repo
+    # that flipped `worklog_form` to "numbered" while `worklog` still pointed
+    # at the template's single file made `genome log` die with a raw
+    # FileExistsError traceback — and `doctor` reported "healthy" on that
+    # tree. The same shape as the kind check above: a health report that says
+    # healthy next to a crashing command is a report that contradicts the
+    # tool's own behaviour. The worklog is the surface a later session resumes
+    # from, so it crashing is not a cosmetic problem.
+    if cfg.has("worklog") and worklog_numbered(cfg):
+        wl = cfg.path("worklog")
+        if wl.exists() and not wl.is_dir():
+            finds.append(f"numbered worklog needs `worklog` to be a DIRECTORY, but {cfg.rel(wl)} is a file "
+                         f"— `genome log` crashes on it; point the role at a directory or use "
+                         f"`worklog_form = \"file\"`")
     d = cfg.coord(cfg.path("workflows"))
     if "agents" in cfg.modules and cfg.form("workflows")[0] == "file" and d.is_dir():
         for f in sorted(d.glob("*.md")):
