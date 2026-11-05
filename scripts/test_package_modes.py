@@ -320,6 +320,76 @@ def installer_local_source_rebuilds_a_stale_checkout():
 
 
 @case
+def installer_local_source_never_breaks_a_working_install():
+    """A failed `--from-local` install must leave the EXISTING install working.
+
+    Measured 2026-11-05 by accident: `uv tool install --force` UNINSTALLS the
+    old copy BEFORE it builds the new one, so an install that fails at the wheel
+    build leaves NOTHING — the binary and the whole uv tool directory are gone,
+    and the operator is left with no genome at all. Proven in isolation: a
+    working install, then `uv tool install --force` from a checkout that cannot
+    build, left the tool directory absent and the binary unrunnable.
+
+    The installer now proves the wheel builds BEFORE uv runs, and refuses a
+    checkout with no build script at all. Both paths must leave a working
+    install intact — a failed upgrade that removes the thing it was upgrading is
+    worse than a failed upgrade, because the operator cannot recover from it
+    without knowing the route.
+
+    This case asserts the property, not the implementation: after each refused
+    install the binary still exists and still runs, at the version it had.
+    """
+    if not shutil.which("uv"):
+        return
+    home = Path(tempfile.mkdtemp(prefix="genome-nobreak-")) / "home"
+    home.mkdir(parents=True)
+    tool_dir = home.parent / "uvtool"
+    tool_dir.mkdir()
+    env = dict(os.environ, HOME=str(home), XDG_DATA_HOME=str(home / "data"),
+               UV_TOOL_DIR=str(tool_dir), UV_TOOL_BIN_DIR=str(home / "bin"))
+
+    # a WORKING install first
+    good = run(["bash", str(ROOT / "install.sh"), "--from-local", str(ROOT), "--no-cta"],
+               env=env, cwd=str(home))
+    assert good.returncode == 0, f"the baseline install failed: {(good.stdout + good.stderr)[-400:]}"
+    exe = next((p for p in (home / "bin" / "genome", tool_dir / "bin" / "genome") if p.exists()), None)
+    assert exe, "the baseline install produced no binary"
+    before = run([str(exe), "--version"]).stdout.strip()
+
+    # --- case 1: a checkout with NO scripts/build.py ---
+    nobuild = home.parent / "nobuild"
+    nobuild.mkdir()
+    shutil.copy2(ROOT / "pyproject.toml", nobuild / "pyproject.toml")
+    (nobuild / "scripts").mkdir()
+    (nobuild / "scripts" / "genome").write_text("not a kernel\n")
+    r1 = run(["bash", str(ROOT / "install.sh"), "--from-local", str(nobuild), "--no-cta"],
+             env=env, cwd=str(home))
+    both1 = r1.stdout + r1.stderr
+    assert r1.returncode != 0, f"a checkout with no build script was accepted: {both1[-300:]}"
+    assert "build.py" in both1, f"the refusal did not say what is missing: {both1[-300:]}"
+    assert exe.exists(), "the working install was REMOVED by a refused install"
+    assert run([str(exe), "--version"]).stdout.strip() == before, "the working install changed"
+
+    # --- case 2: a checkout WITH build.py whose WHEEL cannot build ---
+    broken = home.parent / "broken"
+    (broken / "scripts").mkdir(parents=True)
+    shutil.copytree(ROOT / "src", broken / "src")
+    shutil.copy2(ROOT / "pyproject.toml", broken / "pyproject.toml")
+    shutil.copy2(ROOT / "scripts" / "build.py", broken / "scripts" / "build.py")
+    shutil.copy2(ROOT / "scripts" / "genome", broken / "scripts" / "genome")
+    # NO README.md: pyproject declares it, so the wheel build fails
+    assert not (broken / "README.md").exists(), "the fixture needs a missing README"
+    r2 = run(["bash", str(ROOT / "install.sh"), "--from-local", str(broken), "--no-cta"],
+             env=env, cwd=str(home))
+    both2 = r2.stdout + r2.stderr
+    assert r2.returncode != 0, f"a checkout whose wheel cannot build was accepted: {both2[-300:]}"
+    assert "untouched" in both2 or "could not build" in both2, \
+        f"the refusal did not say the install was left alone: {both2[-300:]}"
+    assert exe.exists(), "the working install was REMOVED by a failed build"
+    assert run([str(exe), "--version"]).stdout.strip() == before, "the working install changed"
+
+
+@case
 def installer_exits_nonzero_when_it_refuses():
     """The rejection paths must be visible to a `set -e` CI job or a chained
     script — observed once where a piped `head` hid a real exit 1. Tested directly

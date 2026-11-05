@@ -162,6 +162,14 @@ def worktree_coordination(root: Path) -> None:
     assert "1 new" in run(wt, "wake", env={"GENOME_AGENT_ID": "c"}).stdout
     # the read mark is written to the coordination home, so the next wake (any worktree) starts here
     assert "1 new" not in run(wt, "wake", env={"GENOME_AGENT_ID": "c"}).stdout
+    # the same-host default identity is disambiguated per checkout (agent_identity): two worktrees
+    # that both forgot GENOME_AGENT_ID are two agents, and one cannot silently take the other's
+    # claim. ("" overrides run()'s own tester default, forcing the never-exported fallback path.)
+    run(root, "wf", "add", "mig", "second item")
+    run(root, "claim", "mig-002", env={"GENOME_AGENT_ID": ""})    # default id in the main worktree
+    r = run(wt, "claim", "mig-002", ok=False, env={"GENOME_AGENT_ID": ""})  # the wt default carries @wt — not the same agent
+    assert r.returncode == 2 and "claimed by" in r.stdout + r.stderr, r.stdout + r.stderr
+    assert "INBOX" in run(wt, "wake").stdout                      # the per-checkout identity gives every worktree its own inbox
 
 
 @case
@@ -177,6 +185,29 @@ def worktrunk_init(root: Path) -> None:
     (fake / "wt").chmod(0o755)
     run(root, "init", "--profile", "team", env={"PATH": f"{fake}:{os.environ['PATH']}"})
     assert "worktrunk hooks" in (root / ".config" / "wt.toml").read_text()
+    assert (root / "docs/kb/workflows/.gitkeep").exists()          # empty role dirs survive the trip to a fresh worktree
+
+
+@case
+def coordination_fallback(root: Path) -> None:
+    """doctor says it out loud when the coordination home cannot be trusted (the main checkout lost its config)"""
+    full_repo(root)
+    wt = root.parent / f"{root.name}-wt"
+    git(root, "worktree", "add", "-b", "feat", str(wt))
+    (root / "genome.toml").rename(root / "genome.toml.bak")
+    out = run(wt, "doctor").stdout
+    (root / "genome.toml.bak").rename(root / "genome.toml")
+    assert "LOCAL coordination" in out, out
+
+
+@case
+def init_agents_note(root: Path) -> None:
+    """a pre-existing AGENTS.md is kept — init says the worktrunk loop never landed instead of writing it"""
+    new_repo(root)
+    (root / "AGENTS.md").write_text("# my repo — my own contract\n")
+    out = run(root, "init", "--profile", "team").stdout
+    assert "predates the worktrunk loop" in out, out
+    assert "Parallel agents — worktrees" not in (root / "AGENTS.md").read_text()
 
 
 @case
@@ -1733,6 +1764,13 @@ def kb_registry(root: Path) -> None:
     (old / "genome.toml").write_text('[genome]\nmodules = ["core"]\nnonsense_key = 1\n')  # E017: deterministic
     ap = _sp.run([sys.executable, G, "installs", "upgrade", "--roots", str(old), "--apply"],
                  capture_output=True, text=True, cwd=str(root), env={**os.environ, **env})
+    # THE REGISTRY RECORDS WHAT THE DISPATCH LANDED: after --apply the manifest row reads
+    # the shipped version, so `installs verify` judges later drift from today rather than
+    # from registration day — the dispatch used to leave every row it upgraded reading
+    # STALE ("changed since registration") forever, which drowned real drift in noise.
+    row_after = [r for r in json.loads(man.read_text())["installs"] if r["path"] == str(old)][0]
+    assert row_after["version"] == cur, (row_after, cur)
+    assert "registry: 1 row(s) recorded at" in ap.stdout, ap.stdout
     target.write_text(kept_text)
     body = ap.stdout
     assert "upgraded" in body and str(old) in body, body
@@ -2806,7 +2844,6 @@ def malformed_kind_is_a_message_not_a_traceback(root: Path) -> None:
         f"doctor reported healthy on a repo whose commands crash: {doc}"
     assert any("probe" in f and "path" in f for f in doc.get("findings", [])), \
         f"doctor did not name the unusable kind: {doc}"
-
 
 
 

@@ -106,6 +106,15 @@ if [ -n "$FROM_LOCAL" ]; then
   # The wheel force-includes scripts/genome as _genome.py, so a checkout whose
   # build is stale would install the STALE kernel. Build it here rather than
   # letting the install silently carry whatever bytes were on disk.
+  #
+  # A checkout with NO build script is REFUSED, not passed through. Measured
+  # 2026-11-05: `uv tool install --force` UNINSTALLS the existing copy BEFORE it
+  # builds the new one, so a new install that fails to build leaves NOTHING —
+  # the binary and the whole tool directory are gone. A checkout with no
+  # build.py skips this guard, goes straight to uv, and fails at the wheel
+  # build, taking the working install down with it. Refusing here keeps a
+  # working install working: the failure happens before anything is removed.
+  [ -f "$FROM_LOCAL/scripts/build.py" ] || die "--from-local needs $FROM_LOCAL/scripts/build.py to build the checkout's kernel (a checkout without it would install whatever scripts/genome happens to hold, and a failed build would take the existing install down with it)"
   if [ -f "$FROM_LOCAL/scripts/build.py" ]; then
     ( cd "$FROM_LOCAL" && python3 scripts/build.py ) || die "--from-local could not build $FROM_LOCAL (run scripts/build.py there and read its error)"
   fi
@@ -206,6 +215,21 @@ try_pip_floor() {
 # (the --skill bundle never ran and nothing said why).
 if [ -n "$SRC" ]; then
   info "installing $SRC_LABEL (unreleased build)"
+  # BUILD THE WHEEL FIRST, so a broken checkout fails BEFORE the existing install
+  # is touched. Measured 2026-11-05: `uv tool install --force` uninstalls the
+  # old copy BEFORE it builds the new one, so a new install that fails at the
+  # wheel build leaves NOTHING — the binary and the whole tool directory are
+  # gone, and the operator is left with no genome at all. Proving the wheel
+  # builds first turns that into an error message instead of an outage. The
+  # check is skipped for a git source (it would need the repo cloned) and for
+  # the PyPI rung (there is nothing local to build).
+  if [ "$FROM_LOCAL" != "" ] && command -v uv >/dev/null 2>&1; then
+    if ! ( cd "$FROM_LOCAL" && uv build --out-dir "$FROM_LOCAL/.genome-wheel-check" >/dev/null 2>&1 ); then
+      rm -rf "$FROM_LOCAL/.genome-wheel-check"
+      die "--from-local could not build a wheel from $FROM_LOCAL — the existing install was left untouched. Read the error by running: (cd $FROM_LOCAL && uv build)"
+    fi
+    rm -rf "$FROM_LOCAL/.genome-wheel-check"
+  fi
   if command -v uv >/dev/null 2>&1; then
     uv tool install --force --from "$SRC" "$PKG" && installed_with="uv ($SRC_LABEL)"
     INSTALL_BIN_DIR="$(uv tool dir --bin 2>/dev/null || echo "$BIN_DIR")"
