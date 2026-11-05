@@ -341,10 +341,15 @@ def main() -> int:
         original = (ROOT / path).read_bytes()
         try:
             restore(ref, path)
-            if needs_build:
-                rebuild()
+            # An EXTRA mutation edits a SOURCE file, and the suite runs the built
+            # artefact — so it has to be applied BEFORE the rebuild, or the build
+            # regenerates the fixed bytes and the mutation is a no-op. Measured
+            # 2026-11-05: with the mutation after the rebuild, append-only-merge-diff
+            # ESCAPED while the same mutation applied by hand failed the test.
             for apply in extra:
                 apply()
+            if needs_build:
+                rebuild()
             rc, out = runner(*cases)
             if rc == 0:
                 escaped.append(name)
