@@ -97,6 +97,16 @@ def lint_core(cfg: Cfg) -> list[str]:
             for f in d.glob("*.md"):
                 if f.name in ("README.md", "INDEX.md"):  # a directory's index is not a plan
                     continue
+                body = read(f)
+                if is_tombstone(body):
+                    # A tombstone is the ARCHIVE's record of a file, not a plan (see
+                    # cmd_archive), so the date rule does not apply to it.  The
+                    # exemption must not be a blind spot: the tombstone's TARGET is
+                    # checked instead, so a stub whose archived file is gone is named.
+                    m = TOMBSTONE.search(body)
+                    if m and not (cfg.root / m.group(1)).exists():
+                        out.append(f"E019 {role} tombstone points at missing `{m.group(1)}`: {cfg.rel(f)}")
+                    continue
                 if cfg.rel(f) not in living and pat.search(f.name) and not re.search(r"\d{4}-\d{2}-\d{2}", f.name):
                     out.append(f"E004 {role} file without a date stamp: {cfg.rel(f)}")
     # living plans

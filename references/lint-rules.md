@@ -12,7 +12,7 @@ Errors are doctrine violations. Warnings are hygiene, or judgement the linter ca
 | E001 | agent contract (or `core.living_plans`) points at a missing file | create it, fix the pointer, or declare a legitimate non-repo reference in `core.pointer_ignore` |
 | E002 | register status outside `open in-progress done rejected blocked` | use the vocabulary; tooling reads it |
 | E003 | terminal register row without `→ [YYYY-MM-DD] <evidence>` | `genome status <id> done --evidence <path>` |
-| E004 | plan/audit file without a date stamp (subject to `core.dated_pattern`; a `README.md` / `INDEX.md` index is exempt) | rename to `YYYY-MM-DD-slug.md`, or declare it a living plan |
+| E004 | plan/audit file without a date stamp (subject to `core.dated_pattern`; a `README.md` / `INDEX.md` index is exempt, and so is a tombstone — the archive's own record of a file) | rename to `YYYY-MM-DD-slug.md`, or declare it a living plan |
 | E005 | agent contract points at a tombstone | point at the current owner |
 | E006 | a generated zone was hand-edited (sha mismatch) | fix the source and re-emit (`genome rec emit`, `genome close`) |
 | E009 | ledger cites a missing evidence file | restore the artefact or fix the citation |
@@ -23,6 +23,7 @@ Errors are doctrine violations. Warnings are hygiene, or judgement the linter ca
 | E017 | `genome.toml` has a key or section genome does not read (a typo switches a check off silently) | fix the spelling; `references/*.md` list every key |
 | E016 | an entry surface exceeds its byte budget | move history out (worklog/archive) or replace prose with a pointer |
 | E018 | `schema_version` is declared and lower than this CLI's: the repo is unmigrated, so every membership glob reads with the old dialect | `genome migrate` — and note an *undeclared* version is not this error, because nothing was migrated *away* from anything |
+| E019 | a tombstone in `docs/plans/` or `docs/audit/` points at an archived file that does not exist | restore the archived file, or re-archive it (`genome archive` writes the target) |
 | W000 | no agent contract | write AGENTS.md: identity, gate, routing table |
 | W006 | two dated plans with overlapping titles | keep one owner, archive the other |
 | W007 | archive file missing from its INDEX / generation manifest, or a generation without a manifest | add the manifest row (`genome archive` writes it) |

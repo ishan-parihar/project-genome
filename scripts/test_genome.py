@@ -3006,6 +3006,49 @@ def append_only_merge_resolution(root: Path) -> None:
     assert "WORKLOG.md" in out, ("the violation did not name the file:\n" + out)
 
 
+@case
+def e004_tombstone(root: Path) -> None:
+    """`genome archive` leaves a tombstone stub in the source dir, and E004 must not call that stub a violation.
+
+    The kernel's own archive writes `# <stem> (superseded)` + a `kb: tombstone` marker into the
+    archived path so the old location stays findable (cmd_archive, flat form). For a DATED name
+    the stub inherits the date and dodges the check; for an UNDATED name the stub is doomed to
+    fail it forever, because the archive deliberately cannot clear the stub. E004 was the only
+    reader of plans/audits without is_tombstone, unlike its siblings at 43/189/507.
+
+    Proven on a purpose-built repo: baseline 1 E004; run the KERNEL's archive; still 1 E004 on the
+    kernel's own stub. The fix empties that tombstone hole while a real undated plan still fires."""
+    full_repo(root)
+    stale = root / "docs/plans/legendary-hacks.md"
+    stale.write_text("# Legendary hacks\n\nAn un-dated plan: the exact content that E004 exists to name.\n")
+    run(root, "archive", str(stale), "--reason", "probe: is a tombstone a plan?")
+    stub = root / "docs/plans/legendary-hacks.md"
+    assert 'kb: tombstone target=' in stub.read_text(), "the archive should have left a tombstone"
+    lint_after = run(root, "lint", ok=False).stdout
+    assert "E004 plans file without a date stamp: docs/plans/legendary-hacks.md" not in lint_after, (
+        "the kernel is red on its OWN archive stub:\n" + lint_after)
+    assert "lint: clean" in lint_after, lint_after
+
+    # The exemption must not blind the rule to a real undated plan.
+    real = root / "docs/plans/real-undated-plan.md"
+    real.write_text("# Real undated plan\n\nNot a tombstone: this is the violation E004 exists to name.\n")
+    assert "E004 plans file without a date stamp: docs/plans/real-undated-plan.md" in run(root, "lint", ok=False).stdout
+
+    # The exemption must not be a blind spot either: a tombstone whose archived
+    # TARGET is gone is named (E019), not excused by the tombstone marker.
+    dangling = root / "docs/plans/dangling.md"
+    dangling.write_text('# Dangling (superseded)\n\n<!-- kb: tombstone target="docs/archive/NOT-THERE.md" -->\n\nMoved.\n')
+    out = run(root, "lint", ok=False).stdout
+    assert "E019 plans tombstone points at missing `docs/archive/NOT-THERE.md`" in out, (
+        "a tombstone pointing at a missing archive file was not named:\n" + out)
+    assert "E004 plans file without a date stamp: docs/plans/dangling.md" not in out, (
+        "the tombstone was still judged as a plan:\n" + out)
+    # Restore the target and the finding clears.  The real undated plan is still
+    # there, so lint still exits non-zero on E004; only E019 must be gone.
+    (root / "docs/archive/NOT-THERE.md").write_text("# Restored\n")
+    assert "E019" not in run(root, "lint", ok=False).stdout
+
+
 def main() -> None:
     names = sys.argv[1:] or list(CASES)
     unknown = [n for n in names if n not in CASES]

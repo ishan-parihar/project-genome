@@ -36,6 +36,7 @@ REPO = HERE.parent
 sys.path.insert(0, str(HERE))
 import mutation_install_sh  # noqa: E402  (needs HERE on the path first)
 import mutation_append_only  # noqa: E402  (same)
+import mutation_e004  # noqa: E402  (same)
 SCRATCH = Path(os.environ.get("JCODE_SCRATCH_DIR") or tempfile.gettempdir()) / "genome-mutation"
 ROOT = REPO          # rebound to the worktree by main()
 
@@ -194,6 +195,20 @@ def append_only_mutation(name):
     return apply
 
 
+def e004_mutation(name):
+    """The MUTATION for the E004 tombstone exemption.
+
+    The exemption and the guard that tests it arrived together, so there is no
+    pre-fix commit to revert to; the mutation drops the `is_tombstone` skip,
+    which is what scripts/mutation_e004.py does.  Same shape as
+    install_sh_mutation, and for the same reason: the MUTATION is returned, not
+    a mutate-and-run bundle, so the control phase stays a plain run.
+    """
+    def apply():
+        mutation_e004.mutate_e004(ROOT, name)
+    return apply
+
+
 # (name, file to revert, ref holding the PRE-FIX version, needs rebuild, runner, cases)
 #
 # Each entry may carry a 7th element: an EXTRA mutation to apply on top of the
@@ -249,6 +264,16 @@ MUTATIONS = [
      "src/10_doctor.py", "HEAD", True, kernel_suite,
      ("append_only_merge_resolution",),
      append_only_mutation("merge-diff-blind")),
+    # The E004 tombstone exemption.  `genome archive` writes a tombstone stub into
+    # the source dir so the old path stays findable; for an UNDATED plans/audits
+    # name that stub is permanently undated, and E004 was the only reader of
+    # plans/audits without the is_tombstone skip its siblings all carry.  The
+    # exemption and the guard arrived together, so the mutation drops the skip.
+    # See scripts/mutation_e004.py.
+    ("e004-tombstone-blind",
+     "src/09_lint_checks.py", "HEAD", True, kernel_suite,
+     ("e004_tombstone",),
+     e004_mutation("e004-tombstone-blind")),
 ]
 
 
