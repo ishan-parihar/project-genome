@@ -226,6 +226,22 @@ def init_mutation(name):
     return apply
 
 
+def init_docs_mutation(name):
+    """The MUTATION for the scaffold's docs-index half.
+
+    `genome init` must LINK every docs page it creates, or the docs gate's
+    D003 calls those pages orphans and the scaffold fails the kernel's own
+    gate -- measured on every profile before this fix.  The links arrived with
+    the guard, so the mutation restores the README's original single-link body.
+    Same shape as install_sh_mutation, and for the same reason: the MUTATION is
+    returned, not a mutate-and-run bundle, so the control phase stays a plain
+    run.
+    """
+    def apply():
+        mutation_init.mutate_init_docs(ROOT, name)
+    return apply
+
+
 # (name, file to revert, ref holding the PRE-FIX version, needs rebuild, runner, cases)
 #
 # Each entry may carry a 7th element: an EXTRA mutation to apply on top of the
@@ -301,6 +317,16 @@ MUTATIONS = [
      "src/13_init.py", "HEAD", True, kernel_suite,
      ("init_scaffold_has_no_dangling_pointer",),
      init_mutation("init-no-readme")),
+    # The scaffold's docs-index half.  init's README must LINK every docs page
+    # it creates: D003 calls an unlinked page an orphan, so the scaffold failed
+    # the kernel's own docs gate on every profile (1 hard failure for software
+    # and team, 2 for research).  The links arrived with the guard, so the
+    # mutation restores the README's original single-link body.
+    # See scripts/mutation_init.py.
+    ("init-readme-no-docs-links",
+     "src/13_init.py", "HEAD", True, kernel_suite,
+     ("init_scaffold_has_no_dangling_pointer",),
+     init_docs_mutation("init-readme-no-docs-links")),
 ]
 
 

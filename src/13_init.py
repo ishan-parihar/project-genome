@@ -123,7 +123,21 @@ def cmd_init(args) -> None:
     # README pointing at docs/OUTLINE.md on a `core`-only repo is a pointer at a file
     # that does not exist, which is the same defect as a role nobody fills. Outward pages
     # are the ones W009 watches, so this is the set that decides.
+    #
+    # EVERY PAGE THE SCAFFOLD CREATES MUST BE LINKED FROM HERE. Measured 2026-11-05:
+    # the README linked only docs/handoff/README.md, while init also creates
+    # docs/RUNBOOK.md (every profile) and docs/INDEX.md (the ops module). The docs
+    # gate's D003 calls a docs page "orphan" when no README and no doc page links it,
+    # so the scaffold init produced FAILED THE KERNEL'S OWN DOCS GATE on every
+    # profile: 1 hard failure for software and team, 2 for research. The gate was
+    # not run on the scaffold, so the defect sat there. A README that names the
+    # files it created is the docs index; a README that names one of them is a
+    # pointer with orphans.
     readme = README_TPL.replace("{{NAME}}", root.name)
+    if "core" in mods:  # the core profile always creates the runbook
+        readme += "\n- [docs/RUNBOOK.md](docs/RUNBOOK.md) — the exact commands and the environment traps\n"
+    if "ops" in mods:
+        readme += "\n- [docs/INDEX.md](docs/INDEX.md) — the map of this knowledge base\n"
     if "outline" in mods:
         readme += "\n- [docs/OUTLINE.md](docs/OUTLINE.md) — the architecture and the reading order\n"
     write("README.md", readme)

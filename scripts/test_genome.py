@@ -229,7 +229,15 @@ def init_scaffold_has_no_dangling_pointer(root: Path) -> None:
     Every profile is checked, because a profile nobody checks is a profile
     nobody knows is broken. `full` needs `genome outline` first: the outline
     module's zone is a derived surface, so the scaffold is not clean until it
-    is emitted -- that is init's own two-step, not a defect."""
+    is emitted -- that is init's own two-step, not a defect.
+
+    The scaffold must also pass the KERNEL'S OWN DOCS GATE. Measured
+    2026-11-05: init's README linked only docs/handoff/README.md while init
+    also created docs/RUNBOOK.md (every profile) and docs/INDEX.md (the ops
+    module), so D003 called those pages orphans and the scaffold failed the
+    docs gate on every profile -- 1 hard failure for software and team, 2 for
+    research. A README that names the files it created is the docs index; a
+    README that names one of them is a pointer with orphans."""
     for prof in ("software", "research", "team"):
         d = root / f"p-{prof}"
         d.mkdir()
@@ -246,6 +254,24 @@ def init_scaffold_has_no_dangling_pointer(root: Path) -> None:
             f"the {prof} scaffold declares readme = {m.group(1)!r} and does not create it")
         assert "`README.md`" not in (d / "AGENTS.md").read_text() or (d / "README.md").is_file(), (
             f"the {prof} scaffold's AGENTS.md cites README.md and does not create it")
+        # Every reader-facing docs page the scaffold created must be LINKED from
+        # the README, or the docs gate's D003 calls it an orphan and the
+        # scaffold fails the kernel's own gate. `docs/RECORDS.md` and anything
+        # under docs/handoff, kb, archive, plans, audit, decisions, regressions,
+        # workflows are EXEMPT by D003's own rule (internal agent records, and
+        # the records index is a tooling page) -- so this follows the gate's
+        # exemption list rather than inventing a stricter one.
+        readme_text = (d / "README.md").read_text()
+        internal = {"handoff", "kb", "archive", "plans", "audit", "decisions",
+                    "regressions", "workflows", "internal", "design"}
+        for page in sorted((d / "docs").rglob("*.md")):
+            parts = page.relative_to(d / "docs").parts
+            if any(part in internal for part in parts[:-1]) or page.name == "RECORDS.md":
+                continue
+            rel = page.relative_to(d).as_posix()
+            assert rel in readme_text, (
+                f"the {prof} scaffold created {rel} and the README does not link it "
+                "-- the docs gate calls that an orphan (D003)")
 
     # `full` turns the outline module on, whose zone is derived: init's own
     # second step is `genome outline`, and the scaffold is clean only after it.
