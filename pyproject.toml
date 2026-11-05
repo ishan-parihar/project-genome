@@ -59,36 +59,35 @@ packages = ["project_genome"]
 [tool.hatch.build.targets.sdist]
 include = [
     "project_genome/",
-    "scripts/genome",
-    "scripts/releases.txt",
-    "scripts/build.py",
-    "scripts/test_genome.py",
-    "scripts/test_package.py",
-    "scripts/test_package_modes.py",
-    "scripts/check_docs_lint.py",
-    "scripts/check_suite_counts.py",
-    "scripts/check_ps1.py",
-    "scripts/mutation_check.py",
-    # The mutation runner that `mutation_check.py` imports. Measured 2026-11-05:
-    # the sdist shipped mutation_check.py WITHOUT it, so running the shipped
-    # suite in the extracted sdist died with "ModuleNotFoundError: No module
-    # named 'mutation_install_sh'". The same defect class as the docs gate
-    # below — a shipped suite whose subject is absent — found by RULE 2 of
-    # the sdist case, because the import is not a module-level `Path` binding
-    # and so RULE 1 cannot see it.
-    "scripts/mutation_install_sh.py",
-    # The docs gate itself, because the suite that tests it ships in this sdist.
-    # Measured 2026-11-05: `check_docs_lint.py` was listed here but the two files
-    # it exists to test were not, so the sdist carried a suite whose subjects were
-    # absent and running it there died on its first case. A shipped suite that
-    # crashes on arrival is a broken artefact that reads green in the repo.
+    # THE SCRIPTS DIRECTORY, DERIVED — measured 2026-11-05.
+    #
+    # This list used to enumerate every file under scripts/ one by one, and
+    # that enumeration was a defect that fired THREE times:
+    #   1. scripts/docs/ was missing, so the sdist shipped check_docs_lint.py
+    #      without the two files it exists to test, and the shipped suite
+    #      died on arrival with 4 hard D001 findings;
+    #   2. scripts/mutation_install_sh.py was missing, so the sdist shipped
+    #      mutation_check.py without the module it imports;
+    #   3. scripts/mutation_append_only.py was missing — the SAME defect
+    #      class, recurring, found by the sdist case on the acceptance run.
+    #
+    # Each time, the fix was to ADD ONE MORE LINE BY HAND. That is not a
+    # fix, it is a repair with no guard: the next sibling module a suite
+    # imports would be forgotten the same way. A directory entry ships the
+    # whole directory, so the list now DERIVES the scripts set from the tree
+    # instead of restating it, and the class cannot recur.
+    #
+    # MEASURED, on a clone: with "scripts/" the sdist ships all 21 tracked
+    # files under it, and a NEW sibling module added to the tree ships with
+    # NO list edit — which is the whole point. test_package then ran 10/10,
+    # including the sdist case that had been failing.
     #
     # NOTE ON HOW THIS LIST WORKS, measured 2026-11-05: a NON-EMPTY `include`
     # list RESTRICTS the sdist to the patterns in it. An EMPTY list means
-    # "everything git tracks" — so emptying the list would ship MORE, not
+    # "everything git tracks" — so emptying this list would ship MORE, not
     # fewer, and the list is not decorative. It is also not a glob list: the
     # entries are paths, and a directory entry ships the whole directory.
-    "scripts/docs/",
+    "scripts/",
     # The files README.md links to, because the sdist ships README.md AND ships
     # the gate that checks it — and that gate FAILED on the sdist it shipped in:
     # 4 hard D001 findings, because AGENTS.md, docs/RUNBOOK.md,
