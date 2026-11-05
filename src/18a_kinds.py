@@ -15,8 +15,35 @@ WHERE_RE = re.compile(r"^\s*([A-Za-z_][\w.-]*)\s*(<=|>=|!=|=|<|>|~)\s*(.*?)\s*$"
 
 
 def kind_specs(cfg: Cfg) -> dict[str, dict]:
+    """The declared kinds, each with its defaults filled in.
+
+    A kind whose declaration CANNOT WORK is not handed out. Measured
+    2026-11-05: `kind_dir()` read `k["path"]` with no guard, so a `[kinds.x]`
+    block with no `path` made `graph`, `show`, `card`, `impact` and `place`
+    die with a raw `KeyError: 'path'` traceback — while `lint` reported E501
+    correctly and `doctor` reported `healthy: true`.
+
+    A traceback is a failure of the TOOL, not of the repo, and the repo's
+    mistake is already named by E501 (`path` is required). So the declaration is
+    dropped here, and the reason is said ONCE on stderr — the commands then
+    report "no such kind" instead of dying, and the linter still names E501.
+
+    Dropping it is not hiding it: the kind never appears in `genome kinds`
+    output, and the stderr line says which one and why. The alternative —
+    handing out a kind that cannot be read — is what made the commands crash.
+    """
     out = {}
     for name, k in cfg.kinds.items():
+        if not isinstance(k.get("path"), str) or not k["path"]:
+            # said once per process, not once per command
+            if not getattr(cfg, "_kind_warned", False):
+                print(f"genome: note: kind `{name}` is not usable — `path` is required, so it is "
+                      f"skipped (run `genome lint` for E501)", file=sys.stderr)
+                try:
+                    cfg._kind_warned = True
+                except AttributeError:
+                    pass
+            continue
         s = dict(k)
         s.setdefault("store", "dir")
         s.setdefault("mutability", "append-only" if s["store"] == "jsonl" else "current")
@@ -30,8 +57,25 @@ def kind_specs(cfg: Cfg) -> dict[str, dict]:
 
 
 def kind_problems(cfg: Cfg) -> list[str]:
-    """E501: a kind declaration that cannot work (checked before any entity is read)."""
+    """E501: a kind declaration that cannot work (checked before any entity is read).
+
+    This reads the RAW declarations, not `kind_specs()`. Measured 2026-11-05:
+    `kind_specs()` began skipping a kind that has no `path`, so that the
+    commands would stop crashing on it — and because this function iterated
+    `kind_specs()`, the linter stopped REPORTING it too. The fix for a crash
+    must not silence the check that names the defect: E501 is the only place
+    the operator is told what to fix.
+
+    So the raw kinds are validated here, and `kind_specs()` is what the
+    commands read.
+    """
     out, specs = [], kind_specs(cfg)
+    # the kinds `kind_specs` could not hand out are still checked: they are the
+    # ones the operator most needs to be told about.
+    for n, k in cfg.kinds.items():
+        if n in specs:
+            continue
+        out.append(f"E501 kind `{n}`: `path` is required")
     for n, k in specs.items():
         def bad(msg):
             out.append(f"E501 kind `{n}`: {msg}")

@@ -2707,6 +2707,68 @@ def redteam7(base: Path) -> None:
 
 
 
+@case
+def malformed_kind_is_a_message_not_a_traceback(root: Path) -> None:
+    """A kind declaration missing `path` must be REPORTED, not crash the command.
+
+    Measured 2026-11-05: `kind_dir()` read `k["path"]` with no guard, so a
+    `[kinds.x]` block without a `path` made `graph`, `show`, `card`, `impact`
+    and `place` die with a raw Python `KeyError: 'path'` traceback — while
+    `lint` reported E501 correctly and `doctor` reported `healthy: true`.
+
+    That is the exact shape this repo's rules exist to prevent, twice over.
+    The crash is a traceback in a gate log, which trains a reader to ignore
+    them. And `doctor` saying "healthy" on a repo whose commands crash is a
+    report that contradicts the tool's own behaviour — a health check that
+    does not check the thing that is broken.
+
+    E501 already names the defect ("`path` is required"). So the fix is not a
+    new check: it is that the commands must READ the declaration the way the
+    linter does, and report the same fact the linter reports.
+    """
+    import json as _json
+    new_repo(root)
+    (root / "genome.toml").write_text(
+        '[genome]\nmodules = ["core"]\n'
+        '[kinds.probe]\n'
+        'name = "probe"\n'
+        'id = "P-{n:04}"\n'
+        'states = ["live"]\n'
+    )
+    git(root, "add", "-A"); git(root, "commit", "-qm", "init")
+
+    # the linter already names it — this is the fact the commands must share
+    out = run(root, "lint", "--all", ok=False).stdout
+    assert "E501" in out, out
+    assert "path" in out, out
+
+    # and NO command may crash on it. A traceback is a failure of the tool, not
+    # of the repo: the repo's mistake is already named by E501.
+    for args in (("graph", "probe"), ("show", "X"), ("card", "--stdout"),
+                 ("impact", "X"), ("place", "x")):
+        r = run(root, *args, ok=False)
+        assert "Traceback" not in r.stdout + r.stderr, \
+            f"genome {' '.join(args)} crashed on a malformed kind:\n{r.stdout}\n{r.stderr}"
+        assert "KeyError" not in r.stdout + r.stderr, \
+            f"genome {' '.join(args)} raised KeyError on a malformed kind"
+
+    # doctor must not call a repo healthy whose commands crash.
+    #
+    # The assertion is on the SPECIFIC finding, not on `healthy` alone. A bare
+    # `core` repo is already unhealthy for another reason — it has no
+    # AGENTS.md, no docs/, no state — so `healthy is not True` passed on a
+    # mutant that dropped the kind check entirely, because the MISSING ROLES
+    # kept the repo unhealthy. The mutation escaped because the assertion was
+    # satisfied by the wrong fact. So: the kind's own finding must be named.
+    doc = _json.loads(run(root, "doctor", "--json").stdout)
+    assert doc.get("healthy") is not True, \
+        f"doctor reported healthy on a repo whose commands crash: {doc}"
+    assert any("probe" in f and "path" in f for f in doc.get("findings", [])), \
+        f"doctor did not name the unusable kind: {doc}"
+
+
+
+
 def main() -> None:
     names = sys.argv[1:] or list(CASES)
     unknown = [n for n in names if n not in CASES]
