@@ -4,6 +4,7 @@
 Run: python3 scripts/test_genome.py [case ...]   (stdlib only; every case builds its own throwaway repo)
 Every selected case runs even when one fails; the summary lists them all and the exit code is 1 on any failure.
 """
+import json
 import os
 import re
 import shutil
@@ -190,6 +191,46 @@ def numbered_worklog(root: Path) -> None:
     f = next((root / "docs/worklog").glob("0001-*"))
     (root / "docs/worklog" / f.name.replace("first", "dup")).write_text("# dup\n")
     assert "E014" in run(root, "lint", ok=False).stdout
+
+
+@case
+def numbered_worklog_on_a_file_path_is_reported_not_crashed(root: Path) -> None:
+    """`worklog_form = "numbered"` with a FILE `worklog` must be reported, not crash.
+
+    The numbered form stores each entry as its own file under a DIRECTORY. The
+    template ships `worklog = "docs/kb/WORKLOG.md"` (a file) and
+    `worklog_form = "file"`, so a repo that flips only the form lands on a
+    combination the kernel never handled: `Guarded` called `mkdir` on a FILE
+    and `genome log` died with a raw FileExistsError traceback.
+
+    The shape of the defect is the one this repo's rules exist to prevent, twice
+    over. A traceback in a command log trains a reader to ignore them. And
+    `genome doctor` reported `healthy: true` on exactly such a repo — a health
+    check that does not check the thing that is broken, standing next to a
+    crashing command.
+
+    This case fails on the old code (the traceback) and passes on the new one
+    (a named refusal), and it asserts the doctor finding too, because a fix
+    that makes the command refuse but leaves doctor saying "healthy" has moved
+    the problem rather than closed it.
+    """
+    full_repo(root)
+    toml = (root / "genome.toml").read_text().replace('worklog_form = "file"', 'worklog_form = "numbered"')
+    (root / "genome.toml").write_text(toml)
+    assert (root / "docs/kb/WORKLOG.md").is_file(), "the fixture's worklog should be a file"
+
+    # the command refuses, and says WHY
+    r = run(root, "log", "MISCONFIGURED ENTRY", ok=False)
+    both = r.stdout + r.stderr
+    assert "Traceback" not in both, f"the command still crashes: {both[-500:]}"
+    assert "DIRECTORY" in both, f"the refusal did not say what is wrong: {both[-500:]}"
+    assert "WORKLOG.md" in both, f"the refusal did not name the path: {both[-500:]}"
+
+    # and doctor does not call the tree healthy
+    d = run(root, "doctor", "--json", ok=False)
+    j = json.loads(d.stdout)
+    assert not j["healthy"], f"doctor calls a crashing repo healthy: {d.stdout[:400]}"
+    assert any("DIRECTORY" in f for f in j["findings"]), j["findings"]
 
 
 @case
