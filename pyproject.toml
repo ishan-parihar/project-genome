@@ -68,6 +68,14 @@ include = [
     "scripts/check_docs_lint.py",
     "scripts/check_ps1.py",
     "scripts/mutation_check.py",
+    # The mutation runner that `mutation_check.py` imports. Measured 2026-11-05:
+    # the sdist shipped mutation_check.py WITHOUT it, so running the shipped
+    # suite in the extracted sdist died with "ModuleNotFoundError: No module
+    # named 'mutation_install_sh'". The same defect class as the docs gate
+    # below — a shipped suite whose subject is absent — found by RULE 2 of
+    # the sdist case, because the import is not a module-level `Path` binding
+    # and so RULE 1 cannot see it.
+    "scripts/mutation_install_sh.py",
     # The docs gate itself, because the suite that tests it ships in this sdist.
     # Measured 2026-11-05: `check_docs_lint.py` was listed here but the two files
     # it exists to test were not, so the sdist carried a suite whose subjects were

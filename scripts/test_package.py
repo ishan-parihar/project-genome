@@ -140,6 +140,39 @@ def suite_path_bindings(path: Path):
     return out
 
 
+def suite_module_subjects(path: Path):
+    """The repo-relative paths a suite IMPORTS from beside itself.
+
+    A shipped suite that imports a sibling module needs that module shipped
+    too, and that need is invisible to the Path-binding rule: an import is
+    not a `Path`. Measured 2026-11-05: the sdist shipped `mutation_check.py`
+    without `mutation_install_sh.py`, which it imports, so running the
+    shipped suite in the extracted sdist died with "ModuleNotFoundError: No
+    module named 'mutation_install_sh'".
+
+    Only imports of a SIBLING MODULE count. A stdlib import is not a subject,
+    and an import of a package that is not a sibling file is not either — so
+    the rule is narrow on purpose: an import statement naming a `.py` file
+    that sits in the same directory as the suite.
+
+    Read from the source text rather than from the imported module's
+    `__file__`, because the module may not be importable at all — which is
+    exactly the defect being looked for.
+    """
+    try:
+        text = path.read_text(errors="replace")
+    except OSError:
+        return []
+    here = path.parent.resolve()
+    out = []
+    for m in re.finditer(r"^\s*(?:from|import)\s+([A-Za-z_][A-Za-z0-9_]*)", text, re.M):
+        stem = m.group(1)
+        candidate = here / f"{stem}.py"
+        if candidate.is_file():
+            out.append(candidate)
+    return out
+
+
 def git_tracked_paths():
     """Every path git tracks in this repo, as repo-relative posix strings.
 
@@ -633,13 +666,22 @@ def sdist_ships_the_files_its_own_suites_need():
     RULE 1 — the subject rule. A suite's subject is a path that is BOTH
       (a) TRACKED by git — it is part of the repo's SOURCE, so the sdist
           ought to carry it; and
-      (b) bound by a module-level `Path` in a suite the sdist ships.
+      (b) bound by a module-level `Path` in a suite the sdist ships, OR
+          IMPORTED by a suite the sdist ships as a sibling module.
 
     (a) is the fact that separates a real subject from build output.
     `dist/` is bound by `test_package.py` and `test_package_modes.py`, but it
     is NOT tracked: it is build output, and an sdist does not carry it.
     `scripts/docs/` IS tracked, IS bound by `check_docs_lint.py`, and was
     missing — that was the defect.
+
+    The two kinds of subject in (b) are separate because an IMPORT is not a
+    `Path`. Measured 2026-11-05: the Path rule was blind to a real defect —
+    the sdist shipped `mutation_check.py` without `mutation_install_sh.py`,
+    which it imports, so the shipped suite died with "ModuleNotFoundError:
+    No module named 'mutation_install_sh'". RULE 2 caught it; RULE 1 could
+    not see it. The import rule is deliberately narrow: only a sibling `.py`
+    file in the suite's own directory, so a stdlib import is never a subject.
 
     The bindings are read by IMPORTING each suite, so how the path was
     spelled does not matter. A regex over the source was tried first and had
@@ -714,7 +756,14 @@ def sdist_ships_the_files_its_own_suites_need():
 
     missing = []
     for rel in shipped:
-        for target in suite_path_bindings(ROOT / rel):
+        # RULE 1 has two kinds of subject. (a) a module-level `Path` binding,
+        # and (b) a SIBLING MODULE the suite imports. (b) was added after
+        # (a) was measured to miss a real defect: the sdist shipped
+        # `mutation_check.py` without `mutation_install_sh.py`, which it
+        # imports, and the run rule caught it with "ModuleNotFoundError".
+        # An import is not a `Path`, so (a) could not see it.
+        subjects = list(suite_path_bindings(ROOT / rel)) + list(suite_module_subjects(ROOT / rel))
+        for target in subjects:
             # only paths INSIDE the repo are subjects of the sdist. A suite may
             # bind a path outside it — `mutation_check.py` binds its scratch
             # worktree under $JCODE_SCRATCH_DIR — and that is not something the
