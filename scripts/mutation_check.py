@@ -33,6 +33,8 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent
+sys.path.insert(0, str(HERE))
+import mutation_install_sh  # noqa: E402  (needs HERE on the path first)
 SCRATCH = Path(os.environ.get("JCODE_SCRATCH_DIR") or tempfile.gettempdir()) / "genome-mutation"
 ROOT = REPO          # rebound to the worktree by main()
 
@@ -108,6 +110,69 @@ def docs_suite(*cases):
     return r.returncode, r.stdout + r.stderr
 
 
+def modes_suite(*cases):
+    """Run named cases of the package-modes suite (the installer cases).
+
+    The modes suite installs the BUILT artefacts, and it refuses to run when
+    `dist/` is missing or older than `scripts/genome` ("stale dist/: ... Run
+    `uv build` first"). In a FRESH WORKTREE `dist/` is gitignored and absent,
+    so the suite exits on that guard BEFORE it runs any case. A mutation
+    harness that reads only the exit code then sees "the test failed" and
+    reports the mutation CAUGHT — for a reason that has nothing to do with the
+    mutation. Measured 2026-11-05: two install.sh mutations were reported
+    "caught" with the symptom `Run `uv build` first.`, while the unmutated
+    control failed the SAME way. A harness that cannot distinguish "failed
+    because of the mutation" from "failed because the fixture was missing"
+    measures nothing.
+
+    So the wheel is built here, and the suite's own verdict is checked for the
+    case's name: the failure must name the case that was expected to fail.
+    """
+    ensure_dist_built()
+    r = subprocess.run([sys.executable, str(ROOT / "scripts" / "test_package_modes.py"), *cases],
+                       cwd=str(ROOT), capture_output=True, text=True)
+    return r.returncode, r.stdout + r.stderr
+
+
+def ensure_dist_built():
+    """Build the package artefacts if `dist/` is missing or stale.
+
+    `scripts/build.py` builds the KERNEL (scripts/genome); the WHEEL the
+    installer cases install comes from `uv build`. Both are needed, and in this
+    order: the suite refuses artefacts older than the kernel they were built
+    from.
+    """
+    dist = ROOT / "dist"
+    arts = sorted([*dist.glob("*.whl"), *dist.glob("*.tar.gz")])
+    built = ROOT / "scripts" / "genome"
+    if arts and built.exists() and all(a.stat().st_mtime >= built.stat().st_mtime for a in arts):
+        return
+    # The kernel first (it is what the artefacts are built from), then the package.
+    try:
+        sh(sys.executable, str(ROOT / "scripts" / "build.py"))
+    except AssertionError:
+        pass
+    sh("uv", "build")
+
+
+def install_sh_mutation(name):
+    """A runner that FIRST applies an install.sh mutation, then runs the case.
+
+    The repo's MUTATIONS list expresses a mutation as a git revert to a commit
+    holding the pre-fix file. The two V-111 install.sh guards were ADDED, so no
+    such commit exists: the guarded logic and the guard arrived together. For
+    those, the equivalent is a small edit that removes the guard while leaving
+    the script parseable, which is what scripts/mutation_install_sh.py does.
+
+    The mutation is applied to the THROWAWAY worktree (ROOT), never to the live
+    checkout, and the caller's finally-block restores the file byte for byte.
+    """
+    def run(*cases):
+        mutation_install_sh.mutate(ROOT, name)
+        return modes_suite(*cases)
+    return run
+
+
 # (name, file to revert, ref holding the PRE-FIX version, needs rebuild, runner, cases)
 #
 # Each ref was verified by reading the code at that commit, not by a grep count:
@@ -133,6 +198,15 @@ MUTATIONS = [
      "scripts/docs/docs_lint.py", "4e925d4", False, docs_suite, ("d003_exempts_the_generated_records_index",)),
     ("docs-json-stdout-contract",
      "scripts/docs/docs_lint.py", "7ad2461", False, docs_suite, ("json_stdout_is_one_document",)),
+    # The two V-111 install.sh guards. They were ADDED, so there is no pre-fix
+    # commit to revert to; the ref is the CURRENT commit (a no-op restore) and
+    # the mutation is applied by the runner. See scripts/mutation_install_sh.py.
+    ("install-sh-no-build-py-refusal",
+     "install.sh", "HEAD", False, install_sh_mutation("no-build-py-refusal"),
+     ("installer_local_source_never_breaks_a_working_install",)),
+    ("install-sh-prebuild-unreachable",
+     "install.sh", "HEAD", False, install_sh_mutation("prebuild-unreachable"),
+     ("installer_local_source_never_breaks_a_working_install",)),
 ]
 
 
@@ -170,6 +244,55 @@ def main() -> int:
         return 2
     print(f"mutating in {wt} (the live checkout at {REPO} is not touched)")
 
+    # The live checkout's state is captured BEFORE the run and compared after.
+    # Comparing only AFTER would blame the harness for edits that were already
+    # there: measured 2026-11-05, an uncommitted change of my own was reported
+    # as "FATAL: the live checkout was modified by this run". The harness's
+    # claim is that IT changed nothing, so the evidence must be a DIFF of the
+    # before/after state, not the presence of any dirt.
+    live_before = subprocess.run(["git", "-C", str(REPO), "status", "--porcelain"],
+                                  capture_output=True, text=True).stdout
+    live_before_staged = subprocess.run(["git", "-C", str(REPO), "diff", "--cached", "--name-only"],
+                                        capture_output=True, text=True).stdout
+
+    # THE CONTROL MUST BE MEASURED, NOT ASSUMED. A mutation is only evidence
+    # that a FAILING test failed because of the mutation. If the unmutated test
+    # also fails — a missing fixture, a build the worktree does not have, a
+    # suite that exits on a precondition — then every "caught" below is a
+    # coincidence and the whole run is noise. Measured 2026-11-05: the two
+    # install.sh mutations were reported "caught" with the symptom
+    # `Run `uv build` first.`, because `dist/` is gitignored and absent in a
+    # fresh worktree. The unmutated control failed the SAME way. So the control
+    # is run first, and if it does not pass, the run stops: there is nothing to
+    # measure.
+    print("control: running each mutation's own test UNMUTATED, in this worktree")
+    bad_control = []
+    for name, path, ref, needs_build, runner, cases in MUTATIONS:
+        original = (ROOT / path).read_bytes()
+        try:
+            rc, out = runner(*cases)
+        except Exception as e:
+            rc, out = 1, f"runner raised: {e}"
+        finally:
+            # the runner may have mutated (install_sh_mutation); put it back
+            (ROOT / path).write_bytes(original)
+            if needs_build:
+                rebuild()
+        if rc == 0:
+            print(f"control  {name}: PASSES unmutated  (so a FAIL below means the mutation)")
+        else:
+            bad_control.append(name)
+            first = next((ln for ln in out.splitlines()
+                          if ln.startswith("FAIL") or "stale" in ln or "Error" in ln), out.splitlines()[-1:][0] if out else "")
+            print(f"control  {name}: FAILS unmutated — this run cannot prove anything  [{first.strip()[:90]}]")
+    if bad_control:
+        print(f"\nFATAL: {len(bad_control)} mutation(s) have a control that does not pass: "
+              f"{', '.join(bad_control)}.\n"
+              "A test that already fails proves nothing about the mutation. Fix the fixture "
+              "(for installer cases: `uv build` in the worktree) and re-run.")
+        print(f"(the worktree is left at {wt} for inspection)")
+        return 2
+
     escaped, caught = [], []
     for name, path, ref, needs_build, runner, cases in MUTATIONS:
         # the fixed state, captured so the restore is exact
@@ -204,14 +327,16 @@ def main() -> int:
     # a bug in the cwd binding once reverted four files in the live checkout.
     # So the live tree's own state is captured and compared after the run.
     live_dirty = subprocess.run(["git", "-C", str(REPO), "status", "--porcelain"],
-                                 capture_output=True, text=True).stdout.strip()
+                                 capture_output=True, text=True).stdout
     live_staged = subprocess.run(["git", "-C", str(REPO), "diff", "--cached", "--name-only"],
-                                  capture_output=True, text=True).stdout.strip()
-    if live_dirty or live_staged:
-        print(f"FATAL: the live checkout at {REPO} was modified by this run:\n{live_dirty}\n{live_staged}")
+                                  capture_output=True, text=True).stdout
+    if live_dirty != live_before or live_staged != live_before_staged:
+        print(f"FATAL: the live checkout at {REPO} was modified by this run:\n"
+              f"before: {live_before!r}\nafter:  {live_dirty!r}\n"
+              f"staged before: {live_before_staged!r}\nstaged after:  {live_staged!r}")
         escaped.append("live-checkout-mutated")
     else:
-        print(f"live checkout untouched (clean status, clean index): {REPO}")
+        print(f"live checkout untouched by this run (state identical before and after): {REPO}")
     if args.keep:
         print(f"(--keep: the worktree is left at {wt})")
     else:
