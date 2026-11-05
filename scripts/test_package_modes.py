@@ -348,8 +348,21 @@ def installer_local_source_never_breaks_a_working_install():
     env = dict(os.environ, HOME=str(home), XDG_DATA_HOME=str(home / "data"),
                UV_TOOL_DIR=str(tool_dir), UV_TOOL_BIN_DIR=str(home / "bin"))
 
-    # a WORKING install first
-    good = run(["bash", str(ROOT / "install.sh"), "--from-local", str(ROOT), "--no-cta"],
+    # A faithful checkout to install from. Copy the tree (the wheel build needs
+    # README.md and LICENSE, which pyproject declares) rather than pointing the
+    # installer at ROOT, so the install cannot rewrite this repo's own kernel.
+    good_checkout = home.parent / "goodcheckout"
+    ignore = shutil.ignore_patterns("dist", "__pycache__", ".git", "*.egg-info")
+    shutil.copytree(ROOT, good_checkout, ignore=ignore)
+
+    # A WORKING install first. Install from a COPY of the tree, never from ROOT
+    # itself: `--from-local` BUILDS the checkout it is given, so pointing it at
+    # ROOT rebuilds this repo's tracked `scripts/genome` and dirties the working
+    # tree. Measured 2026-11-05: the first draft of this case passed `ROOT`, and
+    # the suite's own stale-dist guard then failed on the next run because the
+    # kernel had been rewritten underneath it. A test that rewrites the tree it
+    # runs in is a test that breaks its own suite.
+    good = run(["bash", str(ROOT / "install.sh"), "--from-local", str(good_checkout), "--no-cta"],
                env=env, cwd=str(home))
     assert good.returncode == 0, f"the baseline install failed: {(good.stdout + good.stderr)[-400:]}"
     exe = next((p for p in (home / "bin" / "genome", tool_dir / "bin" / "genome") if p.exists()), None)

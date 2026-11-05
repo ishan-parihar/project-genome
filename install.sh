@@ -115,9 +115,7 @@ if [ -n "$FROM_LOCAL" ]; then
   # build, taking the working install down with it. Refusing here keeps a
   # working install working: the failure happens before anything is removed.
   [ -f "$FROM_LOCAL/scripts/build.py" ] || die "--from-local needs $FROM_LOCAL/scripts/build.py to build the checkout's kernel (a checkout without it would install whatever scripts/genome happens to hold, and a failed build would take the existing install down with it)"
-  if [ -f "$FROM_LOCAL/scripts/build.py" ]; then
-    ( cd "$FROM_LOCAL" && python3 scripts/build.py ) || die "--from-local could not build $FROM_LOCAL (run scripts/build.py there and read its error)"
-  fi
+  ( cd "$FROM_LOCAL" && python3 scripts/build.py ) || die "--from-local could not build $FROM_LOCAL (run scripts/build.py there and read its error)"
   SRC="$FROM_LOCAL"
   SRC_LABEL="from the local checkout"
 elif [ "$FROM_GITHUB" = "1" ]; then
