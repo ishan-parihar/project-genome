@@ -3049,6 +3049,251 @@ def e004_tombstone(root: Path) -> None:
     assert "E019" not in run(root, "lint", ok=False).stdout
 
 
+def _git(cwd, *a, check=True):
+    return subprocess.run(["git", *a], cwd=cwd, capture_output=True, text=True, check=check)
+
+
+@case
+def unpushed_vendored_cli(root: Path) -> None:
+    """A vendored CLI that is COMMITTED but whose commit is not on the remote must be
+    reported — the rung above `_uncommitted_cli`, which is blind to it by construction.
+
+    Measured 2026-11-05 over the fleet: 62 of 63 repos with a reachable remote were
+    ahead of it, 46 carrying an unpushed dispatch commit, and no check anywhere said so.
+    `_uncommitted_cli` asks whether the WORKING TREE is modified, and a committed copy
+    has a clean working tree, so it cannot see this case. The whole point of this case
+    is that a clean, committed, unpushed copy is still reported.
+
+    The remote is a LOCAL bare repo and the registry is a PRIVATE manifest, so the
+    case touches neither the network nor the operator's machine. The registry override
+    is `GENOME_INSTALLS` — `installs_manifest()` reads that and NOT `XDG_CONFIG_HOME`,
+    so without it the case would sweep the live fleet.
+
+    FOUR separate situations are covered, because each one is a way the check can be
+    wrong and a single fixture only proves one of them:
+      1. the commit IS on the remote  -> not reported;
+      2. the commit is NOT on it      -> reported, naming the remote;
+      3. the remote has a name other than `origin` -> still resolved and reported
+         (the fleet's remote names vary; automaton has `github` and NO `origin`);
+      4. the remote does not answer   -> reported, NOT as clean — a measurement that
+         could not be taken must never read as a pass;
+      5. the REMOTE is ahead of the local checkout -> not reported, because every
+         local commit is already on the remote's history;
+      6. the repo has no remote at all -> not reported, because it is unversioned
+         rather than unpushed."""
+    remote = root / "remote.git"
+    _git(root, "init", "-q", "--bare", str(remote))
+    repo = root / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    _git(repo, "config", "user.email", "t@t")
+    _git(repo, "config", "user.name", "t")
+    (repo / "scripts").mkdir()
+    shutil.copyfile(G, repo / "scripts/genome")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "genome: commit the vendored CLI")
+    _git(repo, "remote", "add", "origin", str(remote))
+    _git(repo, "push", "-q", "origin", "HEAD:refs/heads/main")
+
+    # A PRIVATE registry holding exactly this one row, plus a skills root to serve
+    # as the "shipped" reference the check compares against.
+    manifest = root / "installs.json"
+    manifest.write_text(json.dumps({
+        "schema": 1,
+        "installs": [
+            {"kind": "vendored", "path": str(repo), "version": "?"},
+            {"kind": "skill", "path": str(root / "skill"), "version": "?"},
+        ],
+    }))
+    skill = root / "skill"
+    (skill / "scripts").mkdir(parents=True)
+    shutil.copyfile(G, skill / "scripts" / "genome")
+    env = {**os.environ, "GENOME_INSTALLS": str(manifest)}
+
+    # ---- 1. the control: the commit IS on the remote, so nothing is reported ----
+    assert _unpushed_through_cli(repo, env) is None, (
+        "a repo whose commit IS on the remote was reported as unpushed")
+
+    # ---- 2. the mutation: one more commit, not pushed ----
+    _git(repo, "commit", "-q", "--allow-empty", "-m", "genome: commit the vendored CLI")
+    found = _unpushed_through_cli(repo, env)
+    assert found is not None, (
+        "a committed-but-unpushed vendored CLI was NOT reported — the working tree is clean, "
+        "so this is exactly the case _uncommitted_cli cannot see")
+    assert "not on origin" in found, f"the detail did not name the remote: {found}"
+
+    # ---- and once it IS pushed, it clears ----
+    _git(repo, "push", "-q", "origin", "HEAD:refs/heads/main")
+    assert _unpushed_through_cli(repo, env) is None, (
+        "the repo was still reported as unpushed after the commit reached the remote")
+
+    # ---- 3. the remote is NOT named `origin` ----
+    # The fleet's remote names vary: measured 2026-11-05, automaton has `github` and
+    # `gitlab` and NO `origin`, and asking only for `origin` reported 25 repos that DO
+    # have a remote as having none at all. So the check must resolve the remote the
+    # branch's upstream names, and must say which one it used.
+    named = root / "named.git"
+    _git(root, "init", "-q", "--bare", str(named))
+    _git(repo, "remote", "add", "github", str(named))
+    _git(repo, "push", "-q", "github", "HEAD:refs/heads/main")
+    _git(repo, "branch", "--set-upstream-to=github/main")
+    _git(repo, "commit", "-q", "--allow-empty", "-m", "genome: commit the vendored CLI")
+    found = _unpushed_through_cli(repo, env)
+    assert found is not None, (
+        "a repo whose remote is named something other than `origin` was NOT reported")
+    assert "not on github" in found, (
+        f"the detail did not name the remote the branch actually pushes to: {found}")
+
+    # ---- 4. the remote does not answer ----
+    # A remote that cannot be reached is a measurement that could NOT be taken. It
+    # must not read as clean: that is the silent-green class this project exists to
+    # catch, and it is the one place where "I could not check" and "it is fine" are
+    # the same output.
+    broken = root / "broken.git"
+    _git(root, "init", "-q", "--bare", str(broken))
+    _git(repo, "remote", "set-url", "github", str(root / "does-not-exist.git"))
+    found = _unpushed_through_cli(repo, env)
+    assert found is not None, (
+        "a remote that did not answer was reported as clean — a measurement that could "
+        "not be taken must never read as a pass")
+    assert "did not answer" in found, (
+        f"the detail did not say the remote was unreachable: {found}")
+
+    # ---- 5. the REMOTE is ahead of the local checkout ----
+    # Someone else pushed. The local HEAD is older, but every local commit IS on
+    # the remote's history, so there is nothing unpushed — and reporting it would
+    # be a false alarm on every repo whose collaborator pushed first. This is the
+    # state the ancestry test exists to recognise.
+    #
+    # The collaborator pushes to the SAME remote, so the remote's history EXTENDS
+    # the local one. Rewriting the local history instead (a reset onto a fetched
+    # branch) produces an unrelated commit, which is a DIFFERENT state and does
+    # not test this at all — the first version of this fixture did that and the
+    # ancestry mutation escaped it.
+    ahead_remote = root / "ahead.git"
+    _git(root, "init", "-q", "--bare", str(ahead_remote))
+    other = root / "other"
+    other.mkdir()
+    _git(other, "init", "-q")
+    _git(other, "config", "user.email", "t@t")
+    _git(other, "config", "user.name", "t")
+    # The collaborator's repo carries the SAME vendored CLI, because the reset
+    # below restores the tree from the remote — and a remote whose tree has no
+    # `scripts/genome` DELETES the vendored copy on reset. The first version of
+    # this fixture seeded the remote with a bare `seed/` directory, the reset
+    # removed the CLI, and the check then correctly reported nothing — so the
+    # fixture tested a row that no longer had a vendored copy, and the ancestry
+    # mutation escaped it.
+    (other / "scripts").mkdir()
+    shutil.copyfile(G, other / "scripts" / "genome")
+    _git(other, "add", "-A")
+    _git(other, "commit", "-qm", "seed")
+    _git(other, "remote", "add", "origin", str(ahead_remote))
+    _git(other, "push", "-q", "origin", "HEAD:refs/heads/main")
+    _git(repo, "remote", "set-url", "github", str(ahead_remote))
+    _git(repo, "fetch", "-q", "github")
+    _git(repo, "reset", "-q", "--hard", "github/main")
+    assert (repo / "scripts" / "genome").exists(), (
+        "the fixture deleted the vendored copy — the reset restored a tree without it")
+    _git(repo, "commit", "-q", "--allow-empty", "-m", "genome: commit the vendored CLI")
+    _git(repo, "push", "-q", "github", "HEAD:refs/heads/main")
+    # The collaborator now pushes ON TOP of what the local checkout has.
+    _git(other, "fetch", "-q", "origin")
+    _git(other, "reset", "-q", "--hard", "origin/main")
+    _git(other, "commit", "-q", "--allow-empty", "-m", "the collaborator's commit")
+    _git(other, "push", "-q", "origin", "HEAD:refs/heads/main")
+    _git(repo, "fetch", "-q", "github")
+    _git(repo, "branch", "--set-upstream-to=github/main")
+    # The local checkout is now BEHIND the remote, and every local commit is on
+    # the remote's history.
+    assert _unpushed_through_cli(repo, env) is None, (
+        "a repo whose REMOTE is ahead of the local checkout was reported as unpushed — "
+        "every local commit is on the remote's history, so there is nothing to push")
+
+    # ---- 6. a vendored row whose repo has NO remote ----
+    # A repo with no remote is not unpushed, it is unversioned. It is committed and
+    # clean and there is nowhere to push to, and calling that unpushed would put
+    # every offline KB on the list.
+    noremote = root / "noremote"
+    noremote.mkdir()
+    _git(noremote, "init", "-q")
+    _git(noremote, "config", "user.email", "t@t")
+    _git(noremote, "config", "user.name", "t")
+    (noremote / "scripts").mkdir()
+    shutil.copyfile(G, noremote / "scripts/genome")
+    _git(noremote, "add", "-A")
+    _git(noremote, "commit", "-qm", "genome: commit the vendored CLI")
+    manifest.write_text(json.dumps({
+        "schema": 1,
+        "installs": [
+            {"kind": "vendored", "path": str(repo), "version": "?"},
+            {"kind": "vendored", "path": str(noremote), "version": "?"},
+            {"kind": "skill", "path": str(root / "skill"), "version": "?"},
+        ],
+    }))
+    out = subprocess.run([sys.executable, G, "installs", "verify", "--against-shipped"],
+                         cwd=repo, capture_output=True, text=True, env=env)
+    assert str(noremote) not in out.stdout, (
+        "a repo with no remote at all was reported as unpushed — it is unversioned, "
+        "not unpushed, and there is nowhere for it to push to")
+
+    # ---- 7. the remote's commit is NOT in this checkout ----
+    # A repo whose local objects predate the remote's tip: `merge-base` cannot
+    # find the remote's commit and exits 128, not 1. That is a measurement that
+    # COULD NOT BE TAKEN, and it must not read as "not an ancestor" — which would
+    # report the repo as unpushed when its commits may all be on the remote. It
+    # must say the answer could not be decided.
+    unknown_remote = root / "unknown.git"
+    _git(root, "init", "-q", "--bare", str(unknown_remote))
+    fresh = root / "fresh"
+    fresh.mkdir()
+    _git(fresh, "init", "-q")
+    _git(fresh, "config", "user.email", "t@t")
+    _git(fresh, "config", "user.name", "t")
+    (fresh / "scripts").mkdir()
+    shutil.copyfile(G, fresh / "scripts" / "genome")
+    _git(fresh, "add", "-A")
+    _git(fresh, "commit", "-qm", "genome: commit the vendored CLI")
+    _git(fresh, "remote", "add", "origin", str(unknown_remote))
+    _git(fresh, "push", "-q", "origin", "HEAD:refs/heads/main")
+    # The collaborator pushes a commit the local checkout has never seen, and the
+    # local repo is NOT fetched — so the remote's HEAD object is absent locally.
+    _git(other, "remote", "set-url", "origin", str(unknown_remote))
+    _git(other, "fetch", "-q", "origin")
+    _git(other, "reset", "-q", "--hard", "origin/main")
+    _git(other, "commit", "-q", "--allow-empty", "-m", "a commit the local checkout has not seen")
+    _git(other, "push", "-q", "origin", "HEAD:refs/heads/main")
+    manifest.write_text(json.dumps({
+        "schema": 1,
+        "installs": [
+            {"kind": "vendored", "path": str(fresh), "version": "?"},
+            {"kind": "skill", "path": str(root / "skill"), "version": "?"},
+        ],
+    }))
+    out = subprocess.run([sys.executable, G, "installs", "verify", "--against-shipped"],
+                         cwd=repo, capture_output=True, text=True, env=env)
+    assert str(fresh) in out.stdout, (
+        "the fixture did not produce the state it claims: the repo whose remote's "
+        f"commit is absent locally was not reported at all:\n{out.stdout}")
+    assert "cannot be decided" in out.stdout, (
+        "a repo whose remote's commit is absent locally was reported as unpushed — "
+        "whether the commit is pushed CANNOT be decided, and a measurement that could "
+        f"not be taken must never read as a verdict:\n{out.stdout}")
+
+
+def _unpushed_through_cli(repo: Path, env):
+    """The UNPUSHED detail the CLI prints for `repo`, or None when it prints none.
+
+    Driven through the BUILT CLI so the case tests the shipped behaviour, not a
+    re-implementation of it."""
+    out = subprocess.run([sys.executable, G, "installs", "verify", "--against-shipped"],
+                         cwd=repo, capture_output=True, text=True, env=env)
+    for line in (out.stdout + out.stderr).splitlines():
+        if line.startswith("UNPUSHED"):
+            return line
+    return None
+
+
 def main() -> None:
     names = sys.argv[1:] or list(CASES)
     unknown = [n for n in names if n not in CASES]
