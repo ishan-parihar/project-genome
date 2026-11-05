@@ -56,8 +56,30 @@ def lint_core(cfg: Cfg) -> list[str]:
             if st in TERMINAL and (len(r) < 3 or "→ [" not in r[2]):
                 out.append(f"E003 register {rid}: terminal without `→ [YYYY-MM-DD] <evidence>`")
             if st in TERMINAL and len(r) > 2:
+                # THE REGISTER'S EVIDENCE USES THE SAME GRAMMAR AS THE LEDGER'S. It did
+                # not: E010 matched every backticked run with a slash in it
+                # (`re.findall(r"`([^`]+)`")`), while E009 — the same question asked of
+                # the same kind of cell — used `pointers()`, which reads a token as a
+                # FILE only when it is file-shaped. So the identical prose was a missing
+                # file in the register and prose in the ledger, and a register row
+                # written by any human being was a lint error: measured 2026-11-05 on
+                # switchpost, 4 rows, 10 findings, every one of them a shell command
+                # (`cp ~/.local/bin/... && systemctl --user restart ...`), an API route
+                # (`GET /api/providers`) or a diff invocation — none of them a file
+                # path, and all of them the evidence a careful row is supposed to cite.
+                # One grammar for one question: the strict one, plus the repo's own
+                # pointer_ignore list (a repo that names a path in prose says so once).
                 for tok in re.findall(r"`([^`]+)`", r[2]):
-                    if "/" in tok and not PTR_BAD.search(tok) and not (cfg.root / tok).exists():
+                    if "/" not in tok or PTR_BAD.search(tok):
+                        continue
+                    t = tok.rstrip(".,:;)").split("#")[0].split("::")[0]
+                    t = re.sub(r":\d+(-\d+)?$", "", t)
+                    if not t or t in ign or not re.fullmatch(r"[\w./@+-]+", t):
+                        continue
+                    if not (re.search(FILE_EXT + r"$", t)
+                            or (re.search(FILE_EXT + r"\.[A-Za-z_]\w*$", t) and "/" in t)):
+                        continue
+                    if not (cfg.root / t).exists():
                         out.append(f"E010 register {rid}: evidence `{tok}` missing")
     # ledger evidence
     if cfg.has("ledger"):

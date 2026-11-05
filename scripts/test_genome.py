@@ -2846,6 +2846,43 @@ def malformed_kind_is_a_message_not_a_traceback(root: Path) -> None:
         f"doctor did not name the unusable kind: {doc}"
 
 
+@case
+def register_evidence_grammar(root: Path) -> None:
+    """E010 reads a register's evidence with the SAME grammar as the ledger's (E009).
+
+    It did not: E010 matched every backticked run containing a slash, so a row whose
+    evidence is a shell command (`cp ~/.local/bin/x && systemctl --user restart x`),
+    an API route (`GET /api/providers`) or a diff invocation was a lint error — 10
+    findings on switchpost's register, every one of them prose. The ledger asked the
+    same question of the same kind of cell with the strict grammar and passed. One
+    grammar for one question: a token is a missing file only when it is file-shaped.
+    """
+    full_repo(root)
+    # a real file-shaped evidence token is still checked: the check did not go away
+    (root / "ev").mkdir()
+    (root / "ev" / "x.md").write_text("# x\n")
+    reg = root / "TODO.md"
+    reg.write_text(reg.read_text() +
+                   "\n| R-EV-1 | done | a row whose evidence cites a real file → [2026-11-05] `ev/x.md` | ok |\n"
+                   "| R-EV-2 | done | a row whose evidence cites a shell command → [2026-11-05] `cp ~/.local/bin/x && systemctl --user restart x` | ok |\n"
+                   "| R-EV-3 | done | a row whose evidence cites an API route → [2026-11-05] `GET /api/providers` | ok |\n")
+    out = run(root, "lint", ok=False).stdout
+    assert "E010" not in out, ("prose evidence was read as a file path:\n" + out)
+    # ... and a token that IS file-shaped but missing is still an error
+    reg.write_text(reg.read_text() +
+                   "| R-EV-4 | done | a row whose evidence cites a missing file → [2026-11-05] `ev/missing.md` | ok |\n")
+    out2 = run(root, "lint", ok=False).stdout
+    assert "E010" in out2 and "ev/missing.md" in out2, ("a missing file-shaped evidence went unreported:\n" + out2)
+    # the repo's own pointer_ignore list applies here too: a repo that names a path in
+    # prose says so once, and the register honours the same declaration as AGENTS.md.
+    # The `full` profile writes no pointer_ignore line (its default is the empty
+    # string), so the key is added under [core] rather than rewritten in place.
+    toml = root / "genome.toml"
+    t = toml.read_text()
+    toml.write_text(t.replace("[core]\n", '[core]\npointer_ignore = "ev/missing.md"\n', 1))
+    out3 = run(root, "lint", ok=False).stdout
+    assert "E010" not in out3, ("pointer_ignore did not reach the register's evidence:\n" + out3)
+
 
 def main() -> None:
     names = sys.argv[1:] or list(CASES)
